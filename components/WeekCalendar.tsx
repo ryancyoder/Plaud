@@ -1,9 +1,10 @@
 "use client";
 
-import { useRef, useState, useCallback } from "react";
+import { useRef, useState, useCallback, useEffect } from "react";
 import { Transcript } from "@/lib/types";
 import { getDayName, getDayNumber, isToday, isPast, formatDuration, getBlockColor, getTagColor, formatDate } from "@/lib/utils";
 import { createDailySummary } from "@/lib/daily-summary";
+import { getCachedSummary, generateDailySummary, hasApiKey } from "@/lib/claude-api";
 
 interface WeekCalendarProps {
   weekDates: string[]; // Mon-Sun, 7 dates
@@ -141,80 +142,96 @@ interface DaySummaryCardProps {
 }
 
 function DaySummaryCard({ date, transcripts, onSelect, isSelected }: DaySummaryCardProps) {
-  const summary = createDailySummary(date, transcripts);
-  const uniqueTags = Array.from(new Set(transcripts.flatMap((t) => t.tags)));
-  const totalActions = transcripts.reduce((n, t) => n + t.actionItems.length, 0);
-  const totalCalls = transcripts.reduce((n, t) => n + t.calls.length, 0);
-  const totalErrands = transcripts.reduce((n, t) => n + t.errands.length, 0);
+  const baseSummary = createDailySummary(date, transcripts);
+  const [aiSummary, setAiSummary] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // Build a concise multi-line summary (first line of each transcript's summary)
-  const briefSummaries = transcripts.map((t) => {
-    const firstLine = t.summary.split("\n")[0].slice(0, 120);
-    return `${t.startTime ? t.startTime + " " : ""}${t.title}: ${firstLine}`;
-  });
+  // Load cached summary on mount
+  useEffect(() => {
+    const cached = getCachedSummary(date);
+    if (cached) setAiSummary(cached);
+  }, [date]);
+
+  const handleGenerate = useCallback(async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!hasApiKey()) {
+      setError("Set your Claude API key in Settings first");
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const segments = transcripts.map((t) => ({
+        startTime: t.startTime,
+        duration: t.duration,
+        title: t.title,
+        text: t.fullTranscript || t.summary || t.title,
+      }));
+      const result = await generateDailySummary(date, segments);
+      setAiSummary(result);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to generate summary");
+    } finally {
+      setLoading(false);
+    }
+  }, [date, transcripts]);
+
+  // Build the synthetic transcript to show in viewer when clicked
+  const viewerTranscript = {
+    ...baseSummary,
+    summary: aiSummary || baseSummary.summary,
+  };
 
   return (
-    <button
-      onClick={() => onSelect(summary)}
-      className={`w-full text-left px-4 py-3 transition-colors ${
+    <div
+      onClick={() => onSelect(viewerTranscript)}
+      className={`w-full text-left px-4 py-3 cursor-pointer transition-colors ${
         isSelected ? "bg-accent-light" : "hover:bg-gray-50 active:bg-gray-100"
       }`}
     >
-      {/* Tag pills */}
-      {uniqueTags.length > 0 && (
-        <div className="flex flex-wrap gap-1 mb-2">
-          {uniqueTags.map((tag) => {
-            const c = getTagColor(tag);
-            return (
-              <span key={tag} className={`text-[10px] px-1.5 py-0.5 rounded-full ${c.bg} ${c.text}`}>
-                {tag}
-              </span>
-            );
-          })}
+      {/* AI summary or generate button */}
+      {aiSummary ? (
+        <div className="mb-2">
+          <div className="flex items-center gap-1.5 mb-1">
+            <span className="text-[10px] font-semibold uppercase text-purple-600">AI Summary</span>
+            <button
+              onClick={handleGenerate}
+              className="text-[10px] text-muted hover:text-accent"
+              title="Regenerate"
+            >
+              ↻
+            </button>
+          </div>
+          <p className="text-xs text-gray-700 leading-relaxed whitespace-pre-wrap">{aiSummary}</p>
         </div>
-      )}
-
-      {/* Brief summaries per recording */}
-      <div className="space-y-1 mb-2">
-        {briefSummaries.map((line, i) => (
-          <p key={i} className="text-xs text-gray-700 leading-snug">
-            <span className="font-semibold">{transcripts[i].startTime}</span>
-            {" "}
-            <span className="font-medium">{transcripts[i].title}</span>
-            <span className="text-muted"> — {transcripts[i].summary.split("\n")[0].slice(0, 100)}</span>
-          </p>
-        ))}
-      </div>
-
-      {/* Participants */}
-      {summary.participants.length > 0 && (
-        <p className="text-[11px] text-muted mb-2">
-          {summary.participants.join(", ")}
-        </p>
+      ) : (
+        <div className="mb-2">
+          <button
+            onClick={handleGenerate}
+            disabled={loading}
+            className="text-[11px] px-3 py-1.5 rounded-lg border border-purple-200 text-purple-600 font-medium hover:bg-purple-50 active:scale-95 disabled:opacity-50"
+          >
+            {loading ? "Generating..." : "Generate AI Summary"}
+          </button>
+          {error && <p className="text-[10px] text-red-500 mt-1">{error}</p>}
+          {/* Fallback: show segment titles */}
+          <div className="mt-2 space-y-0.5">
+            {transcripts.map((t, i) => (
+              <p key={i} className="text-xs text-gray-500 leading-snug truncate">
+                <span className="font-semibold">{t.startTime}</span> {t.title.length > 60 ? t.title.slice(0, 60) + "..." : t.title}
+              </p>
+            ))}
+          </div>
+        </div>
       )}
 
       {/* Stats row */}
       <div className="flex items-center gap-3 text-[10px] text-muted">
-        {totalActions > 0 && (
-          <span className="flex items-center gap-0.5">
-            <span className="w-3 h-3 rounded bg-blue-100 text-blue-600 flex items-center justify-center text-[8px] font-bold">{totalActions}</span>
-            to-do{totalActions !== 1 ? "s" : ""}
-          </span>
-        )}
-        {totalCalls > 0 && (
-          <span className="flex items-center gap-0.5">
-            <span className="w-3 h-3 rounded bg-green-100 text-green-600 flex items-center justify-center text-[8px] font-bold">{totalCalls}</span>
-            call{totalCalls !== 1 ? "s" : ""}
-          </span>
-        )}
-        {totalErrands > 0 && (
-          <span className="flex items-center gap-0.5">
-            <span className="w-3 h-3 rounded bg-amber-100 text-amber-600 flex items-center justify-center text-[8px] font-bold">{totalErrands}</span>
-            errand{totalErrands !== 1 ? "s" : ""}
-          </span>
-        )}
+        <span>{transcripts.length} segment{transcripts.length !== 1 ? "s" : ""}</span>
+        <span>{formatDuration(transcripts.reduce((s, t) => s + t.duration, 0))}</span>
       </div>
-    </button>
+    </div>
   );
 }
 
