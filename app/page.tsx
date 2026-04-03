@@ -178,6 +178,18 @@ export default function Dashboard() {
     setClients(loadClients());
   }, []);
 
+  const handleDeleteTranscript = useCallback((transcriptId: string) => {
+    setTranscripts((prev) => {
+      const updated = prev.filter((t) => t.id !== transcriptId);
+      saveTranscripts(updated.map((t) => ({
+        ...t,
+        attachments: (t.attachments || []).map(({ dataUrl, ...rest }) => ({ ...rest, dataUrl: "" })),
+      })));
+      return updated;
+    });
+    setSelectedTranscript((prev) => (prev?.id === transcriptId ? null : prev));
+  }, []);
+
   const handleAddAttachments = useCallback(async (transcriptId: string, newAttachments: Attachment[]) => {
     // Resize images before storing
     const processed = await Promise.all(
@@ -389,6 +401,7 @@ export default function Dashboard() {
             <WeekCalendar
               weekDates={currentWeek}
               onSelectTranscript={setSelectedTranscript}
+              onDeleteTranscript={handleDeleteTranscript}
               getTranscriptsForDate={getTranscriptsForDate}
               selectedTranscriptId={selectedTranscript?.id}
               viewMode={viewMode}

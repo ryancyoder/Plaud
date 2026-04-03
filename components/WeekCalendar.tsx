@@ -1,5 +1,6 @@
 "use client";
 
+import { useRef, useState, useCallback } from "react";
 import { Transcript } from "@/lib/types";
 import { getDayName, getDayNumber, isToday, isPast, formatDuration, getBlockColor, getTagColor, formatDate } from "@/lib/utils";
 import { createDailySummary } from "@/lib/daily-summary";
@@ -7,6 +8,7 @@ import { createDailySummary } from "@/lib/daily-summary";
 interface WeekCalendarProps {
   weekDates: string[]; // Mon-Sun, 7 dates
   onSelectTranscript: (transcript: Transcript) => void;
+  onDeleteTranscript?: (transcriptId: string) => void;
   getTranscriptsForDate: (date: string) => Transcript[];
   selectedTranscriptId?: string;
   viewMode?: "granular" | "summary";
@@ -15,7 +17,7 @@ interface WeekCalendarProps {
 const WEEKDAY_DATES = (dates: string[]) => dates.slice(0, 5); // Mon-Fri
 const WEEKEND_DATES = (dates: string[]) => dates.slice(5, 7); // Sat-Sun
 
-export default function WeekCalendar({ weekDates, onSelectTranscript, getTranscriptsForDate, selectedTranscriptId, viewMode = "granular" }: WeekCalendarProps) {
+export default function WeekCalendar({ weekDates, onSelectTranscript, onDeleteTranscript, getTranscriptsForDate, selectedTranscriptId, viewMode = "granular" }: WeekCalendarProps) {
   const weekdays = WEEKDAY_DATES(weekDates);
   const weekend = WEEKEND_DATES(weekDates);
 
@@ -28,6 +30,7 @@ export default function WeekCalendar({ weekDates, onSelectTranscript, getTranscr
           date={date}
           transcripts={getTranscriptsForDate(date)}
           onSelect={onSelectTranscript}
+          onDelete={onDeleteTranscript}
           selectedId={selectedTranscriptId}
           viewMode={viewMode}
         />
@@ -63,11 +66,12 @@ interface DayRowProps {
   date: string;
   transcripts: Transcript[];
   onSelect: (transcript: Transcript) => void;
+  onDelete?: (transcriptId: string) => void;
   selectedId?: string;
   viewMode: "granular" | "summary";
 }
 
-function DayRow({ date, transcripts, onSelect, selectedId, viewMode }: DayRowProps) {
+function DayRow({ date, transcripts, onSelect, onDelete, selectedId, viewMode }: DayRowProps) {
   const today = isToday(date);
   const past = isPast(date);
   const sorted = [...transcripts].sort((a, b) => a.startTime.localeCompare(b.startTime));
@@ -112,6 +116,7 @@ function DayRow({ date, transcripts, onSelect, selectedId, viewMode }: DayRowPro
               key={t.id}
               transcript={t}
               onSelect={onSelect}
+              onDelete={onDelete}
               isSelected={selectedId === t.id}
             />
           ))}
@@ -124,6 +129,7 @@ function DayRow({ date, transcripts, onSelect, selectedId, viewMode }: DayRowPro
 interface TranscriptRowProps {
   transcript: Transcript;
   onSelect: (transcript: Transcript) => void;
+  onDelete?: (transcriptId: string) => void;
   isSelected: boolean;
 }
 
@@ -212,60 +218,122 @@ function DaySummaryCard({ date, transcripts, onSelect, isSelected }: DaySummaryC
   );
 }
 
-function TranscriptRow({ transcript, onSelect, isSelected }: TranscriptRowProps) {
+function TranscriptRow({ transcript, onSelect, onDelete, isSelected }: TranscriptRowProps) {
   const primaryTag = transcript.tags[0];
-  const blockColor = primaryTag ? getBlockColor(primaryTag) : "border-l-gray-400 bg-gray-50";
   const tagColor = primaryTag ? getTagColor(primaryTag) : { bg: "bg-gray-100", text: "text-gray-700" };
 
+  const touchStartX = useRef(0);
+  const touchStartY = useRef(0);
+  const isHorizontal = useRef<boolean | null>(null);
+  const [offsetX, setOffsetX] = useState(0);
+  const [swiped, setSwiped] = useState(false);
+  const DELETE_THRESHOLD = 80;
+
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    touchStartX.current = e.touches[0].clientX;
+    touchStartY.current = e.touches[0].clientY;
+    isHorizontal.current = null;
+  }, []);
+
+  const handleTouchMove = useCallback((e: React.TouchEvent) => {
+    const dx = e.touches[0].clientX - touchStartX.current;
+    const dy = e.touches[0].clientY - touchStartY.current;
+    if (isHorizontal.current === null) {
+      if (Math.abs(dx) > 8 || Math.abs(dy) > 8) {
+        isHorizontal.current = Math.abs(dx) > Math.abs(dy);
+      }
+      return;
+    }
+    if (!isHorizontal.current) return;
+    if (dx < 0) setOffsetX(dx);
+  }, []);
+
+  const handleTouchEnd = useCallback(() => {
+    if (offsetX < -DELETE_THRESHOLD) {
+      setSwiped(true);
+      setOffsetX(-DELETE_THRESHOLD);
+    } else {
+      setOffsetX(0);
+    }
+    isHorizontal.current = null;
+  }, [offsetX]);
+
   return (
-    <button
-      onClick={() => onSelect(transcript)}
-      className={`w-full text-left flex items-start gap-3 px-4 py-2.5 transition-colors ${
-        isSelected
-          ? "bg-accent-light"
-          : "hover:bg-gray-50 active:bg-gray-100"
-      }`}
-    >
-      {/* Time column */}
-      <div className="shrink-0 w-14 pt-0.5">
-        <div className="text-sm font-semibold tabular-nums">{transcript.startTime}</div>
-        <div className="text-[10px] text-muted">{formatDuration(transcript.duration)}</div>
+    <div className="relative overflow-hidden">
+      {/* Delete background */}
+      <div className="absolute inset-0 flex items-center justify-end bg-red-500 px-5">
+        <button
+          onClick={() => onDelete?.(transcript.id)}
+          className="text-white text-xs font-bold"
+        >
+          Delete
+        </button>
       </div>
 
-      {/* Color bar */}
-      <div className={`shrink-0 w-1 self-stretch rounded-full ${tagColor.bg.replace("100", "500")}`} />
+      {/* Swipeable content */}
+      <div
+        className="relative bg-surface"
+        style={{
+          transform: `translateX(${swiped ? -DELETE_THRESHOLD : offsetX}px)`,
+          transition: offsetX === 0 || swiped ? "transform 0.2s ease" : "none",
+        }}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+      >
+        <button
+          onClick={() => {
+            if (swiped) {
+              setSwiped(false);
+              setOffsetX(0);
+            } else {
+              onSelect(transcript);
+            }
+          }}
+          className={`w-full text-left flex items-start gap-3 px-4 py-2.5 transition-colors ${
+            isSelected ? "bg-accent-light" : "hover:bg-gray-50 active:bg-gray-100"
+          }`}
+        >
+          <div className="shrink-0 w-14 pt-0.5">
+            <div className="text-sm font-semibold tabular-nums">{transcript.startTime}</div>
+            <div className="text-[10px] text-muted">{formatDuration(transcript.duration)}</div>
+          </div>
 
-      {/* Content */}
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <h4 className="text-sm font-semibold truncate">{transcript.title.length > 60 ? transcript.title.slice(0, 60) + "..." : transcript.title}</h4>
-          {transcript.tags.map((tag) => {
-            const c = getTagColor(tag);
-            return (
-              <span key={tag} className={`text-[10px] px-1.5 py-0.5 rounded-full shrink-0 ${c.bg} ${c.text}`}>
-                {tag}
-              </span>
-            );
-          })}
-          {(transcript.attachments?.length ?? 0) > 0 && (
-            <span className="flex items-center gap-0.5 text-[10px] text-gray-400 shrink-0">
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                <circle cx="8.5" cy="8.5" r="1.5" />
-                <polyline points="21 15 16 10 5 21" />
-              </svg>
-              {transcript.attachments!.length}
-            </span>
-          )}
-        </div>
-      </div>
+          <div className={`shrink-0 w-1 self-stretch rounded-full ${tagColor.bg.replace("100", "500")}`} />
 
-      {/* Arrow */}
-      <div className="shrink-0 self-center text-gray-300">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <polyline points="9 18 15 12 9 6" />
-        </svg>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <h4 className="text-sm font-semibold truncate">
+                {transcript.title.length > 60 ? transcript.title.slice(0, 60) + "..." : transcript.title}
+              </h4>
+              {transcript.tags.map((tag) => {
+                const c = getTagColor(tag);
+                return (
+                  <span key={tag} className={`text-[10px] px-1.5 py-0.5 rounded-full shrink-0 ${c.bg} ${c.text}`}>
+                    {tag}
+                  </span>
+                );
+              })}
+              {(transcript.attachments?.length ?? 0) > 0 && (
+                <span className="flex items-center gap-0.5 text-[10px] text-gray-400 shrink-0">
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                    <circle cx="8.5" cy="8.5" r="1.5" />
+                    <polyline points="21 15 16 10 5 21" />
+                  </svg>
+                  {transcript.attachments!.length}
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="shrink-0 self-center text-gray-300">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <polyline points="9 18 15 12 9 6" />
+            </svg>
+          </div>
+        </button>
       </div>
-    </button>
+    </div>
   );
 }
