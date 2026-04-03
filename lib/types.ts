@@ -12,7 +12,7 @@ export interface Transcript {
   errands: ErrandItem[];
 }
 
-export type Tag = "meeting" | "call" | "personal" | "medical" | "errand" | "brainstorm" | "interview";
+export type Tag = "meeting" | "call" | "personal" | "medical" | "errand" | "brainstorm" | "interview" | "discussion" | "advertisement";
 
 export interface ActionItem {
   id: string;

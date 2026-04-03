@@ -38,6 +38,8 @@ const tagColors: Record<Tag, { bg: string; text: string }> = {
   errand: { bg: "bg-amber-100", text: "text-amber-700" },
   brainstorm: { bg: "bg-cyan-100", text: "text-cyan-700" },
   interview: { bg: "bg-indigo-100", text: "text-indigo-700" },
+  discussion: { bg: "bg-orange-100", text: "text-orange-700" },
+  advertisement: { bg: "bg-gray-100", text: "text-gray-700" },
 };
 
 export function getTagColor(tag: Tag): { bg: string; text: string } {
@@ -52,6 +54,8 @@ const tagBlockColors: Record<Tag, string> = {
   errand: "border-l-amber-500 bg-amber-50",
   brainstorm: "border-l-cyan-500 bg-cyan-50",
   interview: "border-l-indigo-500 bg-indigo-50",
+  discussion: "border-l-orange-500 bg-orange-50",
+  advertisement: "border-l-gray-400 bg-gray-50",
 };
 
 export function getBlockColor(tag: Tag): string {

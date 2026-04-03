@@ -20,14 +20,15 @@ interface RawRecording {
 
   start_time?: string;
   startTime?: string;
+  starttime?: string;
   time?: string;
 
-  duration?: number;
-  duration_minutes?: number;
-  durationMinutes?: number;
-  duration_seconds?: number;
-  durationSeconds?: number;
-  length?: number;
+  duration?: number | string;
+  duration_minutes?: number | string;
+  durationMinutes?: number | string;
+  duration_seconds?: number | string;
+  durationSeconds?: number | string;
+  length?: number | string;
 
   transcript?: string;
   text?: string;
@@ -41,8 +42,10 @@ interface RawRecording {
 
   transcript_type?: string;
   transcriptType?: string;
+  transcripttype?: string;
   transcript_summary?: string;
   transcriptSummary?: string;
+  transcriptsummary?: string;
 
   tags?: string[];
   category?: string;
@@ -79,7 +82,7 @@ function extractDate(raw: RawRecording): string {
 }
 
 function extractTime(raw: RawRecording): string {
-  const timeStr = raw.start_time || raw.startTime || raw.time;
+  const timeStr = raw.start_time || raw.startTime || raw.starttime || raw.time;
 
   if (timeStr) {
     // "14:30", "2:30 PM", "14:30:00", etc.
@@ -116,20 +119,29 @@ function extractTime(raw: RawRecording): string {
 }
 
 function extractDuration(raw: RawRecording): number {
-  if (raw.duration_minutes || raw.durationMinutes) {
-    return raw.duration_minutes || raw.durationMinutes || 1;
+  const val =
+    raw.duration_minutes ?? raw.durationMinutes ??
+    raw.duration_seconds ?? raw.durationSeconds ??
+    raw.duration ?? raw.length;
+
+  if (val === undefined || val === null) return 1;
+
+  const num = typeof val === "string" ? parseFloat(val) : val;
+  if (isNaN(num)) return 1;
+
+  // If the source field was explicitly seconds, convert
+  if (raw.duration_seconds !== undefined || raw.durationSeconds !== undefined) {
+    return Math.max(1, Math.round(num / 60));
   }
-  if (raw.duration_seconds || raw.durationSeconds) {
-    return Math.max(1, Math.round((raw.duration_seconds || raw.durationSeconds || 60) / 60));
+
+  // If the source field was explicitly minutes, use directly
+  if (raw.duration_minutes !== undefined || raw.durationMinutes !== undefined) {
+    return Math.max(1, Math.round(num));
   }
-  if (raw.duration) {
-    // Guess: if > 300, probably seconds; otherwise minutes
-    return raw.duration > 300 ? Math.max(1, Math.round(raw.duration / 60)) : Math.max(1, raw.duration);
-  }
-  if (raw.length) {
-    return raw.length > 300 ? Math.max(1, Math.round(raw.length / 60)) : Math.max(1, raw.length);
-  }
-  return 1;
+
+  // For generic "duration" / "length", guess: > 300 probably seconds
+  if (num > 300) return Math.max(1, Math.round(num / 60));
+  return Math.max(1, Math.round(num));
 }
 
 function extractTitle(raw: RawRecording): string {
@@ -173,11 +185,11 @@ function guessTag(title: string, text: string): Tag[] {
   return tags;
 }
 
-const VALID_TAGS: Tag[] = ["meeting", "call", "personal", "medical", "errand", "brainstorm", "interview"];
+const VALID_TAGS: Tag[] = ["meeting", "call", "personal", "medical", "errand", "brainstorm", "interview", "discussion", "advertisement"];
 
 function extractTags(raw: RawRecording, title: string, text: string): Tag[] {
   // First check transcript_type / type / category
-  const typeStr = raw.transcript_type || raw.transcriptType || raw.type || raw.category;
+  const typeStr = raw.transcript_type || raw.transcriptType || raw.transcripttype || raw.type || raw.category;
   if (typeStr) {
     const normalized = typeStr.toLowerCase().trim();
     if (VALID_TAGS.includes(normalized as Tag)) {
@@ -220,7 +232,7 @@ function extractTags(raw: RawRecording, title: string, text: string): Tag[] {
 
 function extractSummary(raw: RawRecording): string {
   // Prefer explicit summary fields over truncating transcript
-  const summary = raw.transcript_summary || raw.transcriptSummary || raw.summary;
+  const summary = raw.transcript_summary || raw.transcriptSummary || raw.transcriptsummary || raw.summary;
   if (summary) return summary;
   return truncate(extractText(raw), 300);
 }
