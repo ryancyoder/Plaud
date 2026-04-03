@@ -10,8 +10,10 @@ interface ImportButtonProps {
 
 export default function ImportButton({ onImport }: ImportButtonProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const pasteRef = useRef<HTMLTextAreaElement>(null);
   const [importing, setImporting] = useState(false);
   const [showToast, setShowToast] = useState<string | null>(null);
+  const [showPasteArea, setShowPasteArea] = useState(false);
 
   async function handleFiles(files: FileList | null) {
     if (!files || files.length === 0) return;
@@ -28,20 +30,18 @@ export default function ImportButton({ onImport }: ImportButtonProps) {
     }
   }
 
-  async function handlePaste() {
-    try {
-      const text = await navigator.clipboard.readText();
-      if (!text || text.trim().length < 10) {
-        toast("Nothing to paste");
-        return;
-      }
-      const transcript = importFromClipboardText(text);
-      if (transcript) {
-        onImport([transcript]);
-        toast("Transcript pasted and imported");
-      }
-    } catch {
-      toast("Allow clipboard access to paste");
+  function handlePasteSubmit() {
+    const text = pasteRef.current?.value;
+    if (!text || text.trim().length < 10) {
+      toast("Paste some transcript text first");
+      return;
+    }
+    const transcript = importFromClipboardText(text);
+    if (transcript) {
+      onImport([transcript]);
+      toast("Transcript imported");
+      setShowPasteArea(false);
+      if (pasteRef.current) pasteRef.current.value = "";
     }
   }
 
@@ -96,10 +96,14 @@ export default function ImportButton({ onImport }: ImportButtonProps) {
           )}
         </button>
 
-        {/* Paste button */}
+        {/* Paste toggle button */}
         <button
-          onClick={handlePaste}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border border-border bg-surface text-foreground transition-all active:scale-95 hover:bg-gray-50"
+          onClick={() => setShowPasteArea(!showPasteArea)}
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border transition-all active:scale-95 ${
+            showPasteArea
+              ? "border-accent bg-accent-light text-accent"
+              : "border-border bg-surface text-foreground hover:bg-gray-50"
+          }`}
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
@@ -108,6 +112,40 @@ export default function ImportButton({ onImport }: ImportButtonProps) {
           Paste
         </button>
       </div>
+
+      {/* Paste area - slides down below header */}
+      {showPasteArea && (
+        <div className="fixed top-14 left-0 right-0 z-40 bg-surface border-b border-border shadow-lg p-4">
+          <div className="max-w-2xl mx-auto">
+            <p className="text-sm text-muted mb-2">
+              Tap the box below, then long-press and select Paste to paste your transcript:
+            </p>
+            <textarea
+              ref={pasteRef}
+              autoFocus
+              placeholder="Tap here, then paste your SRT or transcript text..."
+              className="w-full h-32 p-3 border border-border rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent"
+            />
+            <div className="flex gap-2 mt-2 justify-end">
+              <button
+                onClick={() => {
+                  setShowPasteArea(false);
+                  if (pasteRef.current) pasteRef.current.value = "";
+                }}
+                className="px-4 py-2 rounded-lg text-sm font-medium text-muted hover:bg-gray-100 active:scale-95"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handlePasteSubmit}
+                className="px-4 py-2 rounded-lg text-sm font-medium bg-accent text-white hover:bg-blue-600 active:scale-95"
+              >
+                Import Pasted Text
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Toast */}
       {showToast && (
