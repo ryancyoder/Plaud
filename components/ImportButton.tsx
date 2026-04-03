@@ -1,7 +1,8 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { importFiles, importFromText } from "@/lib/store";
+import { importFiles, importFromText, importParsedSegments } from "@/lib/store";
+import { srtToSegments, ParsedTranscript } from "@/lib/srt-parser";
 import { Transcript } from "@/lib/types";
 
 interface ImportButtonProps {
@@ -27,6 +28,19 @@ export default function ImportButton({ onImport }: ImportButtonProps) {
     }
     return 180;
   });
+  const [minDuration, setMinDuration] = useState(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("plaud-min-duration");
+      return saved ? parseInt(saved) : 0;
+    }
+    return 0;
+  });
+
+  // Segment preview state (shown after settings, before final import)
+  const [previewSegments, setPreviewSegments] = useState<(ParsedTranscript & { segmentTitle?: string })[]>([]);
+  const [ignoredIndices, setIgnoredIndices] = useState<Set<number>>(new Set());
+  const [showPreview, setShowPreview] = useState(false);
+  const [pendingRecordingStart, setPendingRecordingStart] = useState<Date | null>(null);
 
   // Paste SRT start-time state
   const [pendingPasteText, setPendingPasteText] = useState<string | null>(null);
@@ -79,7 +93,7 @@ export default function ImportButton({ onImport }: ImportButtonProps) {
     }
   }
 
-  function confirmStartTime() {
+  async function confirmStartTime() {
     if (!pendingFiles) return;
     if (!startDate || !startTime) {
       toast("Please enter a start date and time");
@@ -90,11 +104,74 @@ export default function ImportButton({ onImport }: ImportButtonProps) {
       toast("Invalid date or time");
       return;
     }
-    // Persist gap setting
+    // Persist settings
     localStorage.setItem("plaud-gap-threshold", String(gapThreshold));
+    localStorage.setItem("plaud-min-duration", String(minDuration));
     setShowStartPrompt(false);
-    doImport(pendingFiles, recordingStart, gapThreshold);
+
+    // Parse SRT files to get segments for preview
+    const allSegments: (ParsedTranscript & { segmentTitle?: string })[] = [];
+    for (const file of Array.from(pendingFiles)) {
+      if (file.name.toLowerCase().endsWith(".srt")) {
+        const content = await file.text();
+        const segs = srtToSegments(file.name, content, recordingStart, gapThreshold);
+        allSegments.push(...segs);
+      }
+    }
+
+    if (allSegments.length === 0) {
+      toast("No valid SRT entries found");
+      setPendingFiles(null);
+      return;
+    }
+
+    // Check if any segments are under the min duration threshold
+    const shortSegments = minDuration > 0
+      ? allSegments.filter((s) => s.duration * 60 < minDuration || (s.entries.length > 0 && getDurationSeconds(s) < minDuration))
+      : [];
+
+    if (shortSegments.length > 0) {
+      // Show preview with short segments pre-checked for ignore
+      const shortIndices = new Set<number>();
+      allSegments.forEach((s, i) => {
+        const durSec = getDurationSeconds(s);
+        if (durSec < minDuration) shortIndices.add(i);
+      });
+      setPreviewSegments(allSegments);
+      setIgnoredIndices(shortIndices);
+      setPendingRecordingStart(recordingStart);
+      setShowPreview(true);
+    } else {
+      // No short segments — import directly
+      const kept = allSegments;
+      const imported = importParsedSegments(kept);
+      onImport(imported);
+      toast(`${imported.length} transcript${imported.length > 1 ? "s" : ""} imported`);
+      setPendingFiles(null);
+    }
+  }
+
+  function getDurationSeconds(seg: ParsedTranscript): number {
+    if (seg.entries.length === 0) return seg.duration * 60;
+    const first = seg.entries[0];
+    const last = seg.entries[seg.entries.length - 1];
+    return last.endSeconds - first.startSeconds;
+  }
+
+  function confirmPreview() {
+    const kept = previewSegments.filter((_, i) => !ignoredIndices.has(i));
+    if (kept.length === 0) {
+      toast("No segments to import — uncheck some to keep them");
+      return;
+    }
+    const imported = importParsedSegments(kept);
+    onImport(imported);
+    toast(`${imported.length} transcript${imported.length > 1 ? "s" : ""} imported`);
+    setShowPreview(false);
+    setPreviewSegments([]);
+    setIgnoredIndices(new Set());
     setPendingFiles(null);
+    setPendingRecordingStart(null);
   }
 
   function handlePasteSubmit() {
@@ -142,15 +219,34 @@ export default function ImportButton({ onImport }: ImportButtonProps) {
       return;
     }
     localStorage.setItem("plaud-gap-threshold", String(gapThreshold));
+    localStorage.setItem("plaud-min-duration", String(minDuration));
     setShowPasteStartPrompt(false);
-    try {
-      const transcripts = importFromText(pendingPasteText, recordingStart, gapThreshold);
-      if (transcripts.length > 0) {
-        onImport(transcripts);
-        toast(`${transcripts.length} transcript${transcripts.length > 1 ? "s" : ""} imported`);
-      }
-    } catch (e) {
-      toast(`Parse error: ${e instanceof Error ? e.message : "Unknown error"}`);
+
+    // Parse into segments
+    const segs = srtToSegments("Pasted Transcript", pendingPasteText, recordingStart, gapThreshold);
+    if (segs.length === 0) {
+      toast("No valid SRT entries found");
+      setPendingPasteText(null);
+      return;
+    }
+
+    const shortSegments = minDuration > 0
+      ? segs.filter((s) => getDurationSeconds(s) < minDuration)
+      : [];
+
+    if (shortSegments.length > 0) {
+      const shortIndices = new Set<number>();
+      segs.forEach((s, i) => {
+        if (getDurationSeconds(s) < minDuration) shortIndices.add(i);
+      });
+      setPreviewSegments(segs);
+      setIgnoredIndices(shortIndices);
+      setPendingRecordingStart(recordingStart);
+      setShowPreview(true);
+    } else {
+      const imported = importParsedSegments(segs);
+      onImport(imported);
+      toast(`${imported.length} transcript${imported.length > 1 ? "s" : ""} imported`);
     }
     setPendingPasteText(null);
     if (pasteRef.current) pasteRef.current.value = "";
@@ -266,9 +362,11 @@ export default function ImportButton({ onImport }: ImportButtonProps) {
           dateValue={startDate}
           timeValue={startTime}
           gapValue={gapThreshold}
+          minDurationValue={minDuration}
           onDateChange={setStartDate}
           onTimeChange={setStartTime}
           onGapChange={setGapThreshold}
+          onMinDurationChange={setMinDuration}
           onConfirm={confirmStartTime}
           onCancel={() => {
             setShowStartPrompt(false);
@@ -286,13 +384,40 @@ export default function ImportButton({ onImport }: ImportButtonProps) {
           dateValue={pasteStartDate}
           timeValue={pasteStartTime}
           gapValue={gapThreshold}
+          minDurationValue={minDuration}
           onDateChange={setPasteStartDate}
           onTimeChange={setPasteStartTime}
           onGapChange={setGapThreshold}
+          onMinDurationChange={setMinDuration}
           onConfirm={confirmPasteStartTime}
           onCancel={() => {
             setShowPasteStartPrompt(false);
             setPendingPasteText(null);
+          }}
+        />
+      )}
+
+      {/* Segment Preview — short segment ignore */}
+      {showPreview && (
+        <SegmentPreviewModal
+          segments={previewSegments}
+          ignoredIndices={ignoredIndices}
+          minDuration={minDuration}
+          onToggle={(index) => {
+            setIgnoredIndices((prev) => {
+              const next = new Set(prev);
+              if (next.has(index)) next.delete(index);
+              else next.add(index);
+              return next;
+            });
+          }}
+          onConfirm={confirmPreview}
+          onCancel={() => {
+            setShowPreview(false);
+            setPreviewSegments([]);
+            setIgnoredIndices(new Set());
+            setPendingFiles(null);
+            setPendingRecordingStart(null);
           }}
         />
       )}
@@ -307,15 +432,23 @@ export default function ImportButton({ onImport }: ImportButtonProps) {
   );
 }
 
+function formatDurationLabel(seconds: number): string {
+  if (seconds === 0) return "Off";
+  if (seconds >= 60) return `${Math.floor(seconds / 60)}m${seconds % 60 ? ` ${seconds % 60}s` : ""}`;
+  return `${seconds}s`;
+}
+
 function StartTimeModal({
   title,
   description,
   dateValue,
   timeValue,
   gapValue,
+  minDurationValue,
   onDateChange,
   onTimeChange,
   onGapChange,
+  onMinDurationChange,
   onConfirm,
   onCancel,
 }: {
@@ -324,9 +457,11 @@ function StartTimeModal({
   dateValue: string;
   timeValue: string;
   gapValue: number;
+  minDurationValue: number;
   onDateChange: (v: string) => void;
   onTimeChange: (v: string) => void;
   onGapChange: (v: number) => void;
+  onMinDurationChange: (v: number) => void;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
@@ -378,11 +513,35 @@ function StartTimeModal({
                   className="flex-1"
                 />
                 <span className="text-xs font-medium tabular-nums w-14 text-right">
-                  {gapValue >= 60 ? `${Math.floor(gapValue / 60)}m${gapValue % 60 ? ` ${gapValue % 60}s` : ""}` : `${gapValue}s`}
+                  {formatDurationLabel(gapValue)}
                 </span>
               </div>
               <p className="text-[10px] text-muted mt-0.5">
                 Segments separated by more than this silence become separate recordings
+              </p>
+            </div>
+            <div>
+              <label className="text-[10px] font-semibold uppercase text-muted block mb-1">
+                Ignore Short Segments
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="range"
+                  min={0}
+                  max={120}
+                  step={5}
+                  value={minDurationValue}
+                  onChange={(e) => onMinDurationChange(parseInt(e.target.value))}
+                  className="flex-1"
+                />
+                <span className="text-xs font-medium tabular-nums w-14 text-right">
+                  {formatDurationLabel(minDurationValue)}
+                </span>
+              </div>
+              <p className="text-[10px] text-muted mt-0.5">
+                {minDurationValue > 0
+                  ? `Segments shorter than ${formatDurationLabel(minDurationValue)} will be flagged for review before import`
+                  : "No minimum — all segments will be imported"}
               </p>
             </div>
           </div>
@@ -399,7 +558,122 @@ function StartTimeModal({
             onClick={onConfirm}
             className="flex-1 py-2 rounded-lg text-sm font-medium bg-accent text-white hover:bg-blue-600 active:scale-[0.98]"
           >
-            Import
+            {minDurationValue > 0 ? "Preview & Import" : "Import"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SegmentPreviewModal({
+  segments,
+  ignoredIndices,
+  minDuration,
+  onToggle,
+  onConfirm,
+  onCancel,
+}: {
+  segments: (ParsedTranscript & { segmentTitle?: string })[];
+  ignoredIndices: Set<number>;
+  minDuration: number;
+  onToggle: (index: number) => void;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const keptCount = segments.length - ignoredIndices.size;
+  const ignoredCount = ignoredIndices.size;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onCancel}>
+      <div
+        className="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4 overflow-hidden max-h-[80vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-5 pt-5 pb-3 shrink-0">
+          <h2 className="text-sm font-bold mb-1">Review Short Segments</h2>
+          <p className="text-xs text-muted mb-1">
+            {ignoredCount} segment{ignoredCount !== 1 ? "s" : ""} under {formatDurationLabel(minDuration)} will be ignored.
+            Uncheck any you want to keep.
+          </p>
+          <div className="flex gap-3 text-[10px] font-medium mt-2">
+            <span className="text-green-600">{keptCount} importing</span>
+            <span className="text-red-500">{ignoredCount} ignoring</span>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-5 pb-3">
+          <div className="space-y-1">
+            {segments.map((seg, i) => {
+              const durSec = seg.entries.length > 0
+                ? seg.entries[seg.entries.length - 1].endSeconds - seg.entries[0].startSeconds
+                : seg.duration * 60;
+              const isShort = durSec < minDuration;
+              const isIgnored = ignoredIndices.has(i);
+              const title = seg.segmentTitle || seg.fileName;
+              const preview = seg.fullText.slice(0, 100).replace(/\n/g, " ");
+
+              return (
+                <button
+                  key={i}
+                  onClick={() => isShort ? onToggle(i) : undefined}
+                  className={`w-full text-left p-2.5 rounded-lg border transition-colors ${
+                    isIgnored
+                      ? "border-red-200 bg-red-50/50 opacity-60"
+                      : "border-border bg-white"
+                  } ${isShort ? "cursor-pointer hover:bg-gray-50" : "cursor-default"}`}
+                >
+                  <div className="flex items-start gap-2.5">
+                    {isShort && (
+                      <div className={`mt-0.5 w-4 h-4 rounded border-2 shrink-0 flex items-center justify-center ${
+                        isIgnored ? "border-red-400 bg-red-400" : "border-green-500 bg-green-500"
+                      }`}>
+                        {isIgnored ? (
+                          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="white" strokeWidth="2">
+                            <path d="M2 2l6 6M8 2L2 8" />
+                          </svg>
+                        ) : (
+                          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="white" strokeWidth="2">
+                            <path d="M2 5l2 2 4-4" />
+                          </svg>
+                        )}
+                      </div>
+                    )}
+                    {!isShort && <div className="mt-0.5 w-4 h-4 shrink-0" />}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-medium truncate">{title}</span>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full shrink-0 ${
+                          isShort
+                            ? "bg-amber-100 text-amber-700"
+                            : "bg-gray-100 text-gray-500"
+                        }`}>
+                          {durSec < 60 ? `${Math.round(durSec)}s` : `${Math.round(durSec / 60)}m`}
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-muted mt-0.5 truncate">
+                        {seg.startTime} · {preview}
+                      </p>
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="flex gap-2 px-5 py-4 border-t border-border bg-gray-50 shrink-0">
+          <button
+            onClick={onCancel}
+            className="flex-1 py-2 rounded-lg text-sm font-medium text-muted hover:bg-gray-100 active:scale-[0.98]"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            className="flex-1 py-2 rounded-lg text-sm font-medium bg-accent text-white hover:bg-blue-600 active:scale-[0.98]"
+          >
+            Import {keptCount} Segment{keptCount !== 1 ? "s" : ""}
           </button>
         </div>
       </div>

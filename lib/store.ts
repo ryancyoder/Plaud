@@ -1,7 +1,7 @@
 "use client";
 
 import { Transcript, ActionItem, CallItem, ErrandItem } from "./types";
-import { srtToSegments } from "./srt-parser";
+import { srtToSegments, ParsedTranscript } from "./srt-parser";
 import { parseJsonTranscripts, isJsonString } from "./json-parser";
 
 const STORAGE_KEY = "plaud-transcripts";
@@ -43,6 +43,34 @@ export function loadLists(): StoredLists {
 
 export function saveLists(lists: StoredLists): void {
   localStorage.setItem(LISTS_KEY, JSON.stringify(lists));
+}
+
+/**
+ * Import pre-parsed segments (already filtered/previewed by user).
+ */
+export function importParsedSegments(segments: ParsedTranscript[]): Transcript[] {
+  if (segments.length === 0) return [];
+
+  const newTranscripts: Transcript[] = segments.map((seg) => ({
+    id: generateId(),
+    title: (seg as { segmentTitle?: string }).segmentTitle || seg.fileName,
+    date: seg.date,
+    startTime: seg.startTime,
+    duration: seg.duration,
+    summary: truncate(seg.fullText, 300),
+    fullTranscript: seg.fullText,
+    participants: seg.participants,
+    tags: [],
+    actionItems: [],
+    calls: [],
+    errands: [],
+  }));
+
+  const transcripts = loadTranscripts();
+  transcripts.push(...newTranscripts);
+  saveTranscripts(transcripts);
+
+  return newTranscripts;
 }
 
 export async function importSrtFile(file: File, recordingStart: Date, gapThreshold?: number): Promise<Transcript[]> {
