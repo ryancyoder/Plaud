@@ -27,6 +27,7 @@ export default function Dashboard() {
   const [clients, setClients] = useState<Client[]>([]);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [weekOffset, setWeekOffset] = useState(0);
+  const [viewMode, setViewMode] = useState<"granular" | "summary">("granular");
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -126,6 +127,29 @@ export default function Dashboard() {
         </div>
 
         <div className="flex items-center gap-2">
+          {/* View mode toggle */}
+          <div className="flex rounded-lg border border-border overflow-hidden">
+            <button
+              onClick={() => setViewMode("granular")}
+              className={`px-2.5 py-1.5 text-[10px] font-medium transition-colors ${
+                viewMode === "granular"
+                  ? "bg-accent text-white"
+                  : "text-muted hover:bg-gray-50"
+              }`}
+            >
+              Granular
+            </button>
+            <button
+              onClick={() => setViewMode("summary")}
+              className={`px-2.5 py-1.5 text-[10px] font-medium transition-colors border-l border-border ${
+                viewMode === "summary"
+                  ? "bg-accent text-white"
+                  : "text-muted hover:bg-gray-50"
+              }`}
+            >
+              Daily Summary
+            </button>
+          </div>
           <ImportButton onImport={handleImport} />
           {transcripts.length > 0 && (
             <button
@@ -169,6 +193,7 @@ export default function Dashboard() {
               onSelectTranscript={setSelectedTranscript}
               getTranscriptsForDate={getTranscriptsForDate}
               selectedTranscriptId={selectedTranscript?.id}
+              viewMode={viewMode}
             />
           </div>
         </div>

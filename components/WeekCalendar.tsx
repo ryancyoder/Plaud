@@ -2,18 +2,20 @@
 
 import { Transcript } from "@/lib/types";
 import { getDayName, getDayNumber, isToday, isPast, formatDuration, getBlockColor, getTagColor, formatDate } from "@/lib/utils";
+import { createDailySummary } from "@/lib/daily-summary";
 
 interface WeekCalendarProps {
   weekDates: string[]; // Mon-Sun, 7 dates
   onSelectTranscript: (transcript: Transcript) => void;
   getTranscriptsForDate: (date: string) => Transcript[];
   selectedTranscriptId?: string;
+  viewMode?: "granular" | "summary";
 }
 
 const WEEKDAY_DATES = (dates: string[]) => dates.slice(0, 5); // Mon-Fri
 const WEEKEND_DATES = (dates: string[]) => dates.slice(5, 7); // Sat-Sun
 
-export default function WeekCalendar({ weekDates, onSelectTranscript, getTranscriptsForDate, selectedTranscriptId }: WeekCalendarProps) {
+export default function WeekCalendar({ weekDates, onSelectTranscript, getTranscriptsForDate, selectedTranscriptId, viewMode = "granular" }: WeekCalendarProps) {
   const weekdays = WEEKDAY_DATES(weekDates);
   const weekend = WEEKEND_DATES(weekDates);
 
@@ -27,6 +29,7 @@ export default function WeekCalendar({ weekDates, onSelectTranscript, getTranscr
           transcripts={getTranscriptsForDate(date)}
           onSelect={onSelectTranscript}
           selectedId={selectedTranscriptId}
+          viewMode={viewMode}
         />
       ))}
 
@@ -46,6 +49,7 @@ export default function WeekCalendar({ weekDates, onSelectTranscript, getTranscr
                 transcripts={transcripts}
                 onSelect={onSelectTranscript}
                 selectedId={selectedTranscriptId}
+                viewMode={viewMode}
               />
             );
           })}
@@ -60,12 +64,15 @@ interface DayRowProps {
   transcripts: Transcript[];
   onSelect: (transcript: Transcript) => void;
   selectedId?: string;
+  viewMode: "granular" | "summary";
 }
 
-function DayRow({ date, transcripts, onSelect, selectedId }: DayRowProps) {
+function DayRow({ date, transcripts, onSelect, selectedId, viewMode }: DayRowProps) {
   const today = isToday(date);
   const past = isPast(date);
   const sorted = [...transcripts].sort((a, b) => a.startTime.localeCompare(b.startTime));
+  const summaryId = `summary-${date}`;
+  const isSummarySelected = selectedId === summaryId;
 
   return (
     <div className={`rounded-xl border overflow-hidden ${today ? "border-accent bg-blue-50/30" : "border-border bg-surface"}`}>
@@ -88,9 +95,16 @@ function DayRow({ date, transcripts, onSelect, selectedId }: DayRowProps) {
         </div>
       </div>
 
-      {/* Transcript entries */}
+      {/* Content: granular or summary */}
       {sorted.length === 0 ? (
         <div className="px-4 py-3 text-sm text-gray-300">No recordings</div>
+      ) : viewMode === "summary" ? (
+        <DaySummaryCard
+          date={date}
+          transcripts={sorted}
+          onSelect={onSelect}
+          isSelected={isSummarySelected}
+        />
       ) : (
         <div className="divide-y divide-gray-100">
           {sorted.map((t) => (
@@ -111,6 +125,91 @@ interface TranscriptRowProps {
   transcript: Transcript;
   onSelect: (transcript: Transcript) => void;
   isSelected: boolean;
+}
+
+interface DaySummaryCardProps {
+  date: string;
+  transcripts: Transcript[];
+  onSelect: (transcript: Transcript) => void;
+  isSelected: boolean;
+}
+
+function DaySummaryCard({ date, transcripts, onSelect, isSelected }: DaySummaryCardProps) {
+  const summary = createDailySummary(date, transcripts);
+  const uniqueTags = Array.from(new Set(transcripts.flatMap((t) => t.tags)));
+  const totalActions = transcripts.reduce((n, t) => n + t.actionItems.length, 0);
+  const totalCalls = transcripts.reduce((n, t) => n + t.calls.length, 0);
+  const totalErrands = transcripts.reduce((n, t) => n + t.errands.length, 0);
+
+  // Build a concise multi-line summary (first line of each transcript's summary)
+  const briefSummaries = transcripts.map((t) => {
+    const firstLine = t.summary.split("\n")[0].slice(0, 120);
+    return `${t.startTime ? t.startTime + " " : ""}${t.title}: ${firstLine}`;
+  });
+
+  return (
+    <button
+      onClick={() => onSelect(summary)}
+      className={`w-full text-left px-4 py-3 transition-colors ${
+        isSelected ? "bg-accent-light" : "hover:bg-gray-50 active:bg-gray-100"
+      }`}
+    >
+      {/* Tag pills */}
+      {uniqueTags.length > 0 && (
+        <div className="flex flex-wrap gap-1 mb-2">
+          {uniqueTags.map((tag) => {
+            const c = getTagColor(tag);
+            return (
+              <span key={tag} className={`text-[10px] px-1.5 py-0.5 rounded-full ${c.bg} ${c.text}`}>
+                {tag}
+              </span>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Brief summaries per recording */}
+      <div className="space-y-1 mb-2">
+        {briefSummaries.map((line, i) => (
+          <p key={i} className="text-xs text-gray-700 leading-snug">
+            <span className="font-semibold">{transcripts[i].startTime}</span>
+            {" "}
+            <span className="font-medium">{transcripts[i].title}</span>
+            <span className="text-muted"> — {transcripts[i].summary.split("\n")[0].slice(0, 100)}</span>
+          </p>
+        ))}
+      </div>
+
+      {/* Participants */}
+      {summary.participants.length > 0 && (
+        <p className="text-[11px] text-muted mb-2">
+          {summary.participants.join(", ")}
+        </p>
+      )}
+
+      {/* Stats row */}
+      <div className="flex items-center gap-3 text-[10px] text-muted">
+        {totalActions > 0 && (
+          <span className="flex items-center gap-0.5">
+            <span className="w-3 h-3 rounded bg-blue-100 text-blue-600 flex items-center justify-center text-[8px] font-bold">{totalActions}</span>
+            to-do{totalActions !== 1 ? "s" : ""}
+          </span>
+        )}
+        {totalCalls > 0 && (
+          <span className="flex items-center gap-0.5">
+            <span className="w-3 h-3 rounded bg-green-100 text-green-600 flex items-center justify-center text-[8px] font-bold">{totalCalls}</span>
+            call{totalCalls !== 1 ? "s" : ""}
+          </span>
+        )}
+        {totalErrands > 0 && (
+          <span className="flex items-center gap-0.5">
+            <span className="w-3 h-3 rounded bg-amber-100 text-amber-600 flex items-center justify-center text-[8px] font-bold">{totalErrands}</span>
+            errand{totalErrands !== 1 ? "s" : ""}
+          </span>
+        )}
+      </div>
+    </button>
+  );
 }
 
 function TranscriptRow({ transcript, onSelect, isSelected }: TranscriptRowProps) {
