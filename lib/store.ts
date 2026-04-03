@@ -61,13 +61,9 @@ export function saveLists(lists: StoredLists): void {
   localStorage.setItem(LISTS_KEY, JSON.stringify(lists));
 }
 
-export async function importSrtFile(file: File): Promise<Transcript> {
+export async function importSrtFile(file: File, recordingStart: Date): Promise<Transcript> {
   const content = await file.text();
-  const parsed = srtToTranscript(
-    file.name,
-    content,
-    file.lastModified ? new Date(file.lastModified) : undefined
-  );
+  const parsed = srtToTranscript(file.name, content, recordingStart);
 
   const title = file.name
     .replace(/\.srt$/i, "")
@@ -81,6 +77,7 @@ export async function importSrtFile(file: File): Promise<Transcript> {
     startTime: parsed.startTime,
     duration: parsed.duration,
     summary: truncate(parsed.fullText, 300),
+    fullTranscript: parsed.fullText,
     participants: parsed.participants,
     tags: guessTag(file.name, parsed.fullText),
     actionItems: [],
@@ -104,12 +101,13 @@ export async function importJsonFile(file: File): Promise<Transcript[]> {
   return parsed;
 }
 
-export async function importFiles(files: FileList): Promise<Transcript[]> {
+export async function importFiles(files: FileList, recordingStart?: Date): Promise<Transcript[]> {
   const results: Transcript[] = [];
   for (const file of Array.from(files)) {
     const name = file.name.toLowerCase();
     if (name.endsWith(".srt")) {
-      const t = await importSrtFile(file);
+      const start = recordingStart || new Date(file.lastModified);
+      const t = await importSrtFile(file, start);
       results.push(t);
     } else if (name.endsWith(".json")) {
       const ts = await importJsonFile(file);
@@ -119,7 +117,7 @@ export async function importFiles(files: FileList): Promise<Transcript[]> {
   return results;
 }
 
-export function importFromText(text: string): Transcript[] {
+export function importFromText(text: string, recordingStart?: Date): Transcript[] {
   const trimmed = text.trim();
   if (!trimmed) return [];
 
@@ -139,10 +137,11 @@ export function importFromText(text: string): Transcript[] {
   // SRT
   const looksLikeSrt = /\d+\s*\n\d{2}:\d{2}:\d{2}[,.]\d+\s*-->/.test(trimmed);
   if (looksLikeSrt) {
-    const parsed = srtToTranscript("Pasted Transcript", trimmed);
+    const start = recordingStart || new Date();
+    const parsed = srtToTranscript("Pasted Transcript", trimmed, start);
     const transcript: Transcript = {
       id: generateId(),
-      title: `Pasted Recording - ${new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`,
+      title: `Pasted Recording - ${start.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`,
       date: parsed.date,
       startTime: parsed.startTime,
       duration: parsed.duration,

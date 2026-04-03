@@ -1,10 +1,13 @@
 export interface SrtEntry {
   index: number;
-  startTime: string; // HH:MM:SS,mmm
+  startTime: string; // HH:MM:SS,mmm (relative)
   endTime: string;
-  startSeconds: number;
+  startSeconds: number; // relative seconds from file start
   endSeconds: number;
   text: string;
+  // Absolute fields — populated when a start date/time is provided
+  absoluteStart?: Date;
+  absoluteEnd?: Date;
 }
 
 function parseTimestamp(ts: string): number {
@@ -13,11 +16,13 @@ function parseTimestamp(ts: string): number {
   return h * 3600 + m * 60 + s + (parseInt(ms) || 0) / 1000;
 }
 
-function formatTimeFromSeconds(totalSeconds: number): string {
-  const h = Math.floor(totalSeconds / 3600);
-  const m = Math.floor((totalSeconds % 3600) / 60);
+function formatTimeHHMM(date: Date): string {
   const pad = (n: number) => n.toString().padStart(2, "0");
-  return `${pad(h)}:${pad(m)}`;
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function formatDateYMD(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
 export function parseSrt(content: string): SrtEntry[] {
@@ -54,25 +59,46 @@ export function parseSrt(content: string): SrtEntry[] {
   return entries;
 }
 
+/**
+ * Apply absolute timestamps to SRT entries given a recording start time.
+ */
+export function applyAbsoluteTimestamps(entries: SrtEntry[], recordingStart: Date): SrtEntry[] {
+  const baseMs = recordingStart.getTime();
+  return entries.map((e) => ({
+    ...e,
+    absoluteStart: new Date(baseMs + e.startSeconds * 1000),
+    absoluteEnd: new Date(baseMs + e.endSeconds * 1000),
+  }));
+}
+
 export interface ParsedTranscript {
   fileName: string;
-  date: string;
-  startTime: string;
-  duration: number; // minutes
+  date: string;       // YYYY-MM-DD
+  startTime: string;  // HH:MM (absolute)
+  duration: number;   // minutes
   fullText: string;
   entries: SrtEntry[];
   participants: string[];
 }
 
+/**
+ * Parse an SRT file into a transcript.
+ * @param fileName - original file name
+ * @param content - SRT file content
+ * @param recordingStart - absolute date/time the recording began
+ */
 export function srtToTranscript(
   fileName: string,
   content: string,
-  fileDate?: Date
+  recordingStart: Date,
 ): ParsedTranscript {
-  const entries = parseSrt(content);
+  let entries = parseSrt(content);
   if (entries.length === 0) {
     throw new Error("No valid SRT entries found in file");
   }
+
+  // Apply absolute timestamps
+  entries = applyAbsoluteTimestamps(entries, recordingStart);
 
   const firstEntry = entries[0];
   const lastEntry = entries[entries.length - 1];
@@ -89,28 +115,10 @@ export function srtToTranscript(
 
   const fullText = entries.map((e) => e.text).join(" ");
 
-  // Try to extract date from filename first (e.g. "2026-04-03_meeting.srt", "meeting_20260403.srt")
-  let date: string | null = null;
-  const isoMatch = fileName.match(/(\d{4}-\d{2}-\d{2})/);
-  if (isoMatch) {
-    date = isoMatch[1];
-  } else {
-    const compactMatch = fileName.match(/(\d{4})(\d{2})(\d{2})/);
-    if (compactMatch) {
-      date = `${compactMatch[1]}-${compactMatch[2]}-${compactMatch[3]}`;
-    }
-  }
-  if (!date && fileDate) {
-    date = fileDate.toISOString().split("T")[0];
-  }
-  if (!date) {
-    date = new Date().toISOString().split("T")[0];
-  }
-
   return {
     fileName,
-    date,
-    startTime: formatTimeFromSeconds(firstEntry.startSeconds),
+    date: formatDateYMD(recordingStart),
+    startTime: formatTimeHHMM(recordingStart),
     duration: durationMinutes,
     fullText,
     entries,

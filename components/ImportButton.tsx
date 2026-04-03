@@ -15,11 +15,49 @@ export default function ImportButton({ onImport }: ImportButtonProps) {
   const [showToast, setShowToast] = useState<string | null>(null);
   const [showPasteArea, setShowPasteArea] = useState(false);
 
-  async function handleFiles(files: FileList | null) {
+  // SRT start-time prompt state
+  const [pendingFiles, setPendingFiles] = useState<FileList | null>(null);
+  const [showStartPrompt, setShowStartPrompt] = useState(false);
+  const [startDate, setStartDate] = useState("");
+  const [startTime, setStartTime] = useState("");
+
+  // Paste SRT start-time state
+  const [pendingPasteText, setPendingPasteText] = useState<string | null>(null);
+  const [showPasteStartPrompt, setShowPasteStartPrompt] = useState(false);
+  const [pasteStartDate, setPasteStartDate] = useState("");
+  const [pasteStartTime, setPasteStartTime] = useState("");
+
+  function todayStr() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  }
+
+  function nowTimeStr() {
+    const d = new Date();
+    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  }
+
+  function handleFileSelect(files: FileList | null) {
     if (!files || files.length === 0) return;
+
+    // Check if any SRT files are in the selection
+    const hasSrt = Array.from(files).some((f) => f.name.toLowerCase().endsWith(".srt"));
+    if (hasSrt) {
+      // Show the start date/time prompt
+      setPendingFiles(files);
+      setStartDate(todayStr());
+      setStartTime("09:00");
+      setShowStartPrompt(true);
+    } else {
+      // JSON files — import directly
+      doImport(files);
+    }
+  }
+
+  async function doImport(files: FileList, recordingStart?: Date) {
     setImporting(true);
     try {
-      const imported = await importFiles(files);
+      const imported = await importFiles(files, recordingStart);
       if (imported.length > 0) {
         onImport(imported);
         toast(`${imported.length} transcript${imported.length > 1 ? "s" : ""} imported`);
@@ -34,23 +72,78 @@ export default function ImportButton({ onImport }: ImportButtonProps) {
     }
   }
 
+  function confirmStartTime() {
+    if (!pendingFiles) return;
+    if (!startDate || !startTime) {
+      toast("Please enter a start date and time");
+      return;
+    }
+    const recordingStart = new Date(`${startDate}T${startTime}:00`);
+    if (isNaN(recordingStart.getTime())) {
+      toast("Invalid date or time");
+      return;
+    }
+    setShowStartPrompt(false);
+    doImport(pendingFiles, recordingStart);
+    setPendingFiles(null);
+  }
+
   function handlePasteSubmit() {
     const text = pasteRef.current?.value;
     if (!text || text.trim().length < 5) {
       toast("Paste some transcript text first");
       return;
     }
+
+    const trimmed = text.trim();
+    const looksLikeSrt = /\d+\s*\n\d{2}:\d{2}:\d{2}[,.]\d+\s*-->/.test(trimmed);
+
+    if (looksLikeSrt) {
+      // SRT detected — prompt for start time
+      setPendingPasteText(trimmed);
+      setPasteStartDate(todayStr());
+      setPasteStartTime("09:00");
+      setShowPasteStartPrompt(true);
+      setShowPasteArea(false);
+    } else {
+      // JSON or plain text — import directly
+      try {
+        const transcripts = importFromText(trimmed);
+        if (transcripts.length > 0) {
+          onImport(transcripts);
+          toast(`${transcripts.length} transcript${transcripts.length > 1 ? "s" : ""} imported`);
+          setShowPasteArea(false);
+          if (pasteRef.current) pasteRef.current.value = "";
+        }
+      } catch (e) {
+        toast(`Parse error: ${e instanceof Error ? e.message : "Unknown error"}`);
+      }
+    }
+  }
+
+  function confirmPasteStartTime() {
+    if (!pendingPasteText) return;
+    if (!pasteStartDate || !pasteStartTime) {
+      toast("Please enter a start date and time");
+      return;
+    }
+    const recordingStart = new Date(`${pasteStartDate}T${pasteStartTime}:00`);
+    if (isNaN(recordingStart.getTime())) {
+      toast("Invalid date or time");
+      return;
+    }
+    setShowPasteStartPrompt(false);
     try {
-      const transcripts = importFromText(text);
+      const transcripts = importFromText(pendingPasteText, recordingStart);
       if (transcripts.length > 0) {
         onImport(transcripts);
         toast(`${transcripts.length} transcript${transcripts.length > 1 ? "s" : ""} imported`);
-        setShowPasteArea(false);
-        if (pasteRef.current) pasteRef.current.value = "";
       }
     } catch (e) {
       toast(`Parse error: ${e instanceof Error ? e.message : "Unknown error"}`);
     }
+    setPendingPasteText(null);
+    if (pasteRef.current) pasteRef.current.value = "";
   }
 
   function toast(msg: string) {
@@ -66,7 +159,7 @@ export default function ImportButton({ onImport }: ImportButtonProps) {
         accept=".srt,.json"
         multiple
         className="hidden"
-        onChange={(e) => handleFiles(e.target.files)}
+        onChange={(e) => handleFileSelect(e.target.files)}
       />
 
       <div className="flex items-center gap-2">
@@ -76,7 +169,7 @@ export default function ImportButton({ onImport }: ImportButtonProps) {
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => {
             e.preventDefault();
-            handleFiles(e.dataTransfer.files);
+            handleFileSelect(e.dataTransfer.files);
           }}
           disabled={importing}
           className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all active:scale-95 ${
@@ -121,12 +214,12 @@ export default function ImportButton({ onImport }: ImportButtonProps) {
         </button>
       </div>
 
-      {/* Paste area - slides down below header */}
+      {/* Paste area */}
       {showPasteArea && (
         <div className="fixed top-14 left-0 right-0 z-40 bg-surface border-b border-border shadow-lg p-4">
           <div className="max-w-2xl mx-auto">
             <p className="text-sm text-muted mb-2">
-              Tap the box below, then long-press and select Paste to paste your transcript (SRT, JSON, or plain text):
+              Paste your SRT, JSON, or transcript text:
             </p>
             <textarea
               ref={pasteRef}
@@ -155,6 +248,41 @@ export default function ImportButton({ onImport }: ImportButtonProps) {
         </div>
       )}
 
+      {/* SRT Start Time Prompt — File Import */}
+      {showStartPrompt && (
+        <StartTimeModal
+          title="SRT Import — Recording Start Time"
+          description="SRT files have relative timestamps. Enter when the recording started so we can plot it on the calendar."
+          dateValue={startDate}
+          timeValue={startTime}
+          onDateChange={setStartDate}
+          onTimeChange={setStartTime}
+          onConfirm={confirmStartTime}
+          onCancel={() => {
+            setShowStartPrompt(false);
+            setPendingFiles(null);
+            if (fileInputRef.current) fileInputRef.current.value = "";
+          }}
+        />
+      )}
+
+      {/* SRT Start Time Prompt — Paste */}
+      {showPasteStartPrompt && (
+        <StartTimeModal
+          title="Pasted SRT — Recording Start Time"
+          description="We detected SRT format. Enter when the recording started."
+          dateValue={pasteStartDate}
+          timeValue={pasteStartTime}
+          onDateChange={setPasteStartDate}
+          onTimeChange={setPasteStartTime}
+          onConfirm={confirmPasteStartTime}
+          onCancel={() => {
+            setShowPasteStartPrompt(false);
+            setPendingPasteText(null);
+          }}
+        />
+      )}
+
       {/* Toast */}
       {showToast && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-gray-900 text-white px-4 py-2 rounded-lg shadow-lg text-sm z-50">
@@ -162,5 +290,79 @@ export default function ImportButton({ onImport }: ImportButtonProps) {
         </div>
       )}
     </>
+  );
+}
+
+function StartTimeModal({
+  title,
+  description,
+  dateValue,
+  timeValue,
+  onDateChange,
+  onTimeChange,
+  onConfirm,
+  onCancel,
+}: {
+  title: string;
+  description: string;
+  dateValue: string;
+  timeValue: string;
+  onDateChange: (v: string) => void;
+  onTimeChange: (v: string) => void;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onCancel}>
+      <div
+        className="bg-white rounded-xl shadow-xl w-full max-w-sm mx-4 overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-5 pt-5 pb-3">
+          <h2 className="text-sm font-bold mb-1">{title}</h2>
+          <p className="text-xs text-muted mb-4">{description}</p>
+
+          <div className="space-y-3">
+            <div>
+              <label className="text-[10px] font-semibold uppercase text-muted block mb-1">
+                Recording Date
+              </label>
+              <input
+                type="date"
+                value={dateValue}
+                onChange={(e) => onDateChange(e.target.value)}
+                className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] font-semibold uppercase text-muted block mb-1">
+                Recording Start Time
+              </label>
+              <input
+                type="time"
+                value={timeValue}
+                onChange={(e) => onTimeChange(e.target.value)}
+                className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="flex gap-2 px-5 py-4 border-t border-border bg-gray-50">
+          <button
+            onClick={onCancel}
+            className="flex-1 py-2 rounded-lg text-sm font-medium text-muted hover:bg-gray-100 active:scale-[0.98]"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            className="flex-1 py-2 rounded-lg text-sm font-medium bg-accent text-white hover:bg-blue-600 active:scale-[0.98]"
+          >
+            Import
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
