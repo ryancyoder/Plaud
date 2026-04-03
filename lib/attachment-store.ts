@@ -3,8 +3,9 @@
 import { Attachment } from "./types";
 
 const DB_NAME = "plaud-attachments";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_NAME = "attachments";
+const PENDING_STORE = "pending-photos";
 
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -13,6 +14,9 @@ function openDB(): Promise<IDBDatabase> {
       const db = request.result;
       if (!db.objectStoreNames.contains(STORE_NAME)) {
         db.createObjectStore(STORE_NAME, { keyPath: "id" });
+      }
+      if (!db.objectStoreNames.contains(PENDING_STORE)) {
+        db.createObjectStore(PENDING_STORE, { keyPath: "id" });
       }
     };
     request.onsuccess = () => resolve(request.result);
@@ -114,6 +118,63 @@ export async function clearAllAttachments(): Promise<void> {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readwrite");
     const store = tx.objectStore(STORE_NAME);
+    store.clear();
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+// --- Pending (unmatched) photos ---
+
+export interface PendingPhoto extends Attachment {
+  // timestamp is already on Attachment but is required here
+  timestamp: string; // ISO date-time string, always set
+}
+
+export async function savePendingPhotos(photos: PendingPhoto[]): Promise<void> {
+  if (photos.length === 0) return;
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(PENDING_STORE, "readwrite");
+    const store = tx.objectStore(PENDING_STORE);
+    for (const p of photos) {
+      store.put(p);
+    }
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+export async function loadPendingPhotos(): Promise<PendingPhoto[]> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(PENDING_STORE, "readonly");
+    const store = tx.objectStore(PENDING_STORE);
+    const request = store.getAll();
+    request.onsuccess = () => resolve(request.result as PendingPhoto[]);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function removePendingPhotos(ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(PENDING_STORE, "readwrite");
+    const store = tx.objectStore(PENDING_STORE);
+    for (const id of ids) {
+      store.delete(id);
+    }
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+export async function clearPendingPhotos(): Promise<void> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(PENDING_STORE, "readwrite");
+    const store = tx.objectStore(PENDING_STORE);
     store.clear();
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);

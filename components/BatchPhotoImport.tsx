@@ -3,13 +3,15 @@
 import { useState, useRef } from "react";
 import { Transcript, Attachment } from "@/lib/types";
 import { batchMatchPhotos, PhotoMatchResult, UnmatchedPhoto } from "@/lib/photo-matcher";
+import { savePendingPhotos, PendingPhoto } from "@/lib/attachment-store";
 
 interface BatchPhotoImportProps {
   transcripts: Transcript[];
   onPhotosMatched: (results: PhotoMatchResult[]) => void;
+  pendingCount?: number;
 }
 
-export default function BatchPhotoImport({ transcripts, onPhotosMatched }: BatchPhotoImportProps) {
+export default function BatchPhotoImport({ transcripts, onPhotosMatched, pendingCount = 0 }: BatchPhotoImportProps) {
   const [processing, setProcessing] = useState(false);
   const [results, setResults] = useState<{
     matched: PhotoMatchResult[];
@@ -28,6 +30,15 @@ export default function BatchPhotoImport({ transcripts, onPhotosMatched }: Batch
       // Auto-save matched photos
       if (result.matched.length > 0) {
         onPhotosMatched(result.matched);
+      }
+
+      // Save unmatched photos to pending store for later re-matching
+      if (result.unmatched.length > 0) {
+        const pending: PendingPhoto[] = result.unmatched.map((u) => ({
+          ...u.attachment,
+          timestamp: u.timestamp.toISOString(),
+        }));
+        await savePendingPhotos(pending);
       }
     } catch (err) {
       console.error("Batch photo import error:", err);
@@ -62,6 +73,11 @@ export default function BatchPhotoImport({ transcripts, onPhotosMatched }: Batch
           <polyline points="21 15 16 10 5 21" />
         </svg>
         {processing ? "Matching..." : "Photos"}
+        {pendingCount > 0 && (
+          <span className="inline-flex items-center justify-center w-4 h-4 text-[8px] font-bold rounded-full bg-amber-500 text-white">
+            {pendingCount}
+          </span>
+        )}
       </button>
 
       {/* Results modal */}
@@ -96,7 +112,7 @@ export default function BatchPhotoImport({ transcripts, onPhotosMatched }: Batch
                 </div>
                 <div className="flex-1 rounded-lg bg-amber-50 border border-amber-200 p-3 text-center">
                   <div className="text-lg font-bold text-amber-700">{results.unmatched.length}</div>
-                  <div className="text-[10px] text-amber-600 font-medium uppercase">Unmatched</div>
+                  <div className="text-[10px] text-amber-600 font-medium uppercase">Pending</div>
                 </div>
               </div>
 
@@ -129,7 +145,8 @@ export default function BatchPhotoImport({ transcripts, onPhotosMatched }: Batch
               {/* Unmatched photos */}
               {results.unmatched.length > 0 && (
                 <div>
-                  <h3 className="text-[10px] font-semibold uppercase text-muted mb-2">Could Not Match</h3>
+                  <h3 className="text-[10px] font-semibold uppercase text-muted mb-1">Pending — Waiting for Matching Recordings</h3>
+                  <p className="text-[10px] text-gray-400 mb-2">These will auto-match when recordings are imported</p>
                   <div className="space-y-1.5">
                     {results.unmatched.map((u, i) => (
                       <div key={i} className="flex items-center gap-2 p-2 rounded-lg bg-amber-50 border border-amber-200">

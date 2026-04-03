@@ -180,22 +180,6 @@ export function matchPhotoToTranscript(
     }
   }
 
-  // If no match within buffer, assign to the nearest transcript on that day
-  if (!bestMatch) {
-    for (const t of sameDayTranscripts) {
-      const [h, m] = t.startTime.split(":").map(Number);
-      if (isNaN(h) || isNaN(m)) continue;
-      const startDate = new Date(photoDate);
-      startDate.setHours(h, m, 0, 0);
-      const center = startDate.getTime() + (t.duration * 60 * 1000) / 2;
-      const dist = Math.abs(photoTime - center);
-      if (dist < bestDistance) {
-        bestDistance = dist;
-        bestMatch = t;
-      }
-    }
-  }
-
   return bestMatch;
 }
 

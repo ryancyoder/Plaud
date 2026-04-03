@@ -10,15 +10,18 @@ import {
   removeAttachment as dbRemoveAttachment,
   loadAllAttachments,
   clearAllAttachments,
+  clearPendingPhotos,
+  loadPendingPhotos,
+  removePendingPhotos,
   resizeImage,
 } from "@/lib/attachment-store";
+import { matchPhotoToTranscript, PhotoMatchResult } from "@/lib/photo-matcher";
 import WeekCalendar from "@/components/WeekCalendar";
 import SummaryBar from "@/components/SummaryBar";
 import ViewerPanel from "@/components/ViewerPanel";
 import ClientRoster from "@/components/ClientRoster";
 import ImportButton from "@/components/ImportButton";
 import BatchPhotoImport from "@/components/BatchPhotoImport";
-import { PhotoMatchResult } from "@/lib/photo-matcher";
 
 function getWeekLabel(weekDates: string[]): string {
   const start = new Date(weekDates[0] + "T00:00:00");
@@ -37,6 +40,7 @@ export default function Dashboard() {
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [weekOffset, setWeekOffset] = useState(0);
   const [viewMode, setViewMode] = useState<"granular" | "summary">("granular");
+  const [pendingPhotoCount, setPendingPhotoCount] = useState(0);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -49,12 +53,13 @@ export default function Dashboard() {
     setClients(loadClients());
 
     // Load attachment data from IndexedDB and merge
-    loadAllAttachments()
-      .then((allAtts) => {
+    Promise.all([loadAllAttachments(), loadPendingPhotos()])
+      .then(([allAtts, pending]) => {
         const merged = cleaned.map((t) => ({
           ...t,
           attachments: allAtts[t.id] || t.attachments || [],
         }));
+        setPendingPhotoCount(pending.length);
         setTranscripts(merged);
         setMounted(true);
       })
@@ -87,14 +92,83 @@ export default function Dashboard() {
     return counts;
   }, [transcripts, clients]);
 
-  const handleImport = useCallback((newTranscripts: Transcript[]) => {
-    setTranscripts((prev) => [...prev, ...newTranscripts]);
+  const rematchPendingPhotos = useCallback(async (allTranscripts: Transcript[]) => {
+    const pending = await loadPendingPhotos();
+    if (pending.length === 0) return;
+
+    const matched: Map<string, PhotoMatchResult> = new Map();
+    const stillPendingIds: string[] = [];
+    const matchedIds: string[] = [];
+
+    for (const photo of pending) {
+      const photoDate = new Date(photo.timestamp);
+      const match = matchPhotoToTranscript(photoDate, allTranscripts);
+      if (match) {
+        matchedIds.push(photo.id);
+        const existing = matched.get(match.id);
+        if (existing) {
+          existing.attachments.push(photo);
+        } else {
+          matched.set(match.id, {
+            transcriptId: match.id,
+            transcriptTitle: match.title,
+            attachments: [photo],
+          });
+        }
+      } else {
+        stillPendingIds.push(photo.id);
+      }
+    }
+
+    if (matched.size > 0) {
+      const results = Array.from(matched.values());
+      // Save matched to IndexedDB
+      for (const r of results) {
+        await dbSaveAttachments(r.transcriptId, r.attachments);
+      }
+      // Remove matched from pending
+      await removePendingPhotos(matchedIds);
+      // Update transcript state
+      setTranscripts((prev) => {
+        const updated = prev.map((t) => {
+          const m = results.find((r) => r.transcriptId === t.id);
+          if (!m) return t;
+          return { ...t, attachments: [...(t.attachments || []), ...m.attachments] };
+        });
+        const forStorage = updated.map((t) => ({
+          ...t,
+          attachments: (t.attachments || []).map(({ dataUrl, ...rest }) => ({ ...rest, dataUrl: "" })),
+        }));
+        saveTranscripts(forStorage);
+        return updated;
+      });
+      // Update selected transcript if affected
+      setSelectedTranscript((prev) => {
+        if (!prev) return prev;
+        const m = results.find((r) => r.transcriptId === prev.id);
+        if (!m) return prev;
+        return { ...prev, attachments: [...(prev.attachments || []), ...m.attachments] };
+      });
+    }
+
+    setPendingPhotoCount(stillPendingIds.length);
   }, []);
+
+  const handleImport = useCallback((newTranscripts: Transcript[]) => {
+    setTranscripts((prev) => {
+      const updated = [...prev, ...newTranscripts];
+      // Trigger re-match of pending photos with the full set
+      rematchPendingPhotos(updated);
+      return updated;
+    });
+  }, [rematchPendingPhotos]);
 
   const handleClearData = useCallback(() => {
     if (window.confirm("Clear all imported transcripts? This cannot be undone.")) {
       saveTranscripts([]);
       clearAllAttachments().catch(() => {});
+      clearPendingPhotos().catch(() => {});
+      setPendingPhotoCount(0);
       setTranscripts([]);
       setSelectedTranscript(null);
     }
@@ -193,6 +267,9 @@ export default function Dashboard() {
       if (!match) return prev;
       return { ...prev, attachments: [...(prev.attachments || []), ...match.attachments] };
     });
+
+    // Refresh pending count
+    loadPendingPhotos().then((p) => setPendingPhotoCount(p.length)).catch(() => {});
   }, []);
 
   const getTranscriptsForDate = useCallback(
@@ -271,7 +348,7 @@ export default function Dashboard() {
             </button>
           </div>
           <ImportButton onImport={handleImport} />
-          <BatchPhotoImport transcripts={transcripts} onPhotosMatched={handleBatchPhotos} />
+          <BatchPhotoImport transcripts={transcripts} onPhotosMatched={handleBatchPhotos} pendingCount={pendingPhotoCount} />
           {transcripts.length > 0 && (
             <button
               onClick={handleClearData}
