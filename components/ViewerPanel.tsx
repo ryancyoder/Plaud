@@ -1,10 +1,10 @@
 "use client";
 
-import { useState } from "react";
-import { Transcript, ActionItem, CallItem, ErrandItem, Client } from "@/lib/types";
+import { useState, useRef, useCallback } from "react";
+import { Transcript, Attachment, ActionItem, CallItem, ErrandItem, Client } from "@/lib/types";
 import { formatDuration, getTagColor, formatDate } from "@/lib/utils";
 
-type Tab = "transcript" | "todos" | "calls" | "errands";
+type Tab = "transcript" | "photos" | "todos" | "calls" | "errands";
 
 interface ViewerPanelProps {
   selectedTranscript: Transcript | null;
@@ -14,6 +14,8 @@ interface ViewerPanelProps {
   clients: Client[];
   onClose: () => void;
   onAssignClient: (transcriptId: string, clientName: string | undefined) => void;
+  onAddAttachments: (transcriptId: string, attachments: Attachment[]) => void;
+  onRemoveAttachment: (transcriptId: string, attachmentId: string) => void;
 }
 
 export default function ViewerPanel({
@@ -24,14 +26,19 @@ export default function ViewerPanel({
   clients,
   onClose,
   onAssignClient,
+  onAddAttachments,
+  onRemoveAttachment,
 }: ViewerPanelProps) {
   const [activeTab, setActiveTab] = useState<Tab>(selectedTranscript ? "transcript" : "todos");
 
   // Switch to transcript tab when a transcript is selected
   const effectiveTab = selectedTranscript && activeTab === "transcript" ? "transcript" : activeTab;
 
+  const photoCount = selectedTranscript?.attachments?.length ?? 0;
+
   const tabs: { key: Tab; label: string; count?: number }[] = [
     { key: "transcript", label: "Transcript" },
+    { key: "photos", label: "Photos", count: photoCount },
     { key: "todos", label: "To-Do", count: actionItems.filter((a) => !a.done).length },
     { key: "calls", label: "Calls", count: callItems.filter((c) => !c.done).length },
     { key: "errands", label: "Errands", count: errandItems.filter((e) => !e.done).length },
@@ -74,6 +81,14 @@ export default function ViewerPanel({
             clients={clients}
             onClose={onClose}
             onAssignClient={onAssignClient}
+            onAddAttachments={onAddAttachments}
+          />
+        )}
+        {effectiveTab === "photos" && (
+          <PhotoGallery
+            transcript={selectedTranscript}
+            onAddAttachments={onAddAttachments}
+            onRemoveAttachment={onRemoveAttachment}
           />
         )}
         {effectiveTab === "todos" && <TodoList items={actionItems} />}
@@ -89,13 +104,16 @@ function TranscriptView({
   clients,
   onClose,
   onAssignClient,
+  onAddAttachments,
 }: {
   transcript: Transcript | null;
   clients: Client[];
   onClose: () => void;
   onAssignClient: (transcriptId: string, clientName: string | undefined) => void;
+  onAddAttachments: (transcriptId: string, attachments: Attachment[]) => void;
 }) {
   const [showAssign, setShowAssign] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   if (!transcript) {
     return (
       <div className="flex items-center justify-center h-full text-muted text-sm p-8 text-center">
@@ -221,6 +239,60 @@ function TranscriptView({
         </div>
       )}
 
+      {/* Photos & Attachments */}
+      <div className="mb-3">
+        <div className="flex items-center justify-between mb-1">
+          <h3 className="text-[10px] font-semibold uppercase text-muted">
+            Photos & Documents
+            {(transcript.attachments?.length ?? 0) > 0 && (
+              <span className="ml-1 text-accent">({transcript.attachments!.length})</span>
+            )}
+          </h3>
+          <div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*,.pdf,.doc,.docx"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                const files = e.target.files;
+                if (!files || files.length === 0) return;
+                handleFileAttach(files, transcript.id, onAddAttachments);
+                e.target.value = "";
+              }}
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="text-[10px] px-2 py-0.5 rounded border border-accent text-accent hover:bg-accent-light active:scale-95 font-medium"
+            >
+              + Attach
+            </button>
+          </div>
+        </div>
+        {(transcript.attachments?.length ?? 0) > 0 ? (
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {transcript.attachments!.map((att) => (
+              <div key={att.id} className="shrink-0 w-16 h-16 rounded-lg overflow-hidden border border-border relative group">
+                {att.mimeType.startsWith("image/") ? (
+                  <img src={att.dataUrl} alt={att.name} className="w-full h-full object-cover" />
+                ) : (
+                  <div className="w-full h-full bg-gray-100 flex flex-col items-center justify-center">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-gray-400">
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z" />
+                      <polyline points="14 2 14 8 20 8" />
+                    </svg>
+                    <span className="text-[8px] text-gray-400 mt-0.5 truncate max-w-[56px]">{att.name.split(".").pop()}</span>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-gray-300">No attachments yet</p>
+        )}
+      </div>
+
       {/* Action Items from this transcript */}
       {transcript.actionItems.length > 0 && (
         <div className="mb-3">
@@ -271,6 +343,238 @@ function TranscriptView({
               </li>
             ))}
           </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function handleFileAttach(
+  files: FileList,
+  transcriptId: string,
+  onAddAttachments: (transcriptId: string, attachments: Attachment[]) => void,
+) {
+  const promises = Array.from(files).map(
+    (file) =>
+      new Promise<Attachment>((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const type: Attachment["type"] = file.type.startsWith("image/")
+            ? "photo"
+            : "document";
+          resolve({
+            id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            name: file.name,
+            type,
+            mimeType: file.type,
+            dataUrl: reader.result as string,
+            timestamp: new Date().toISOString(),
+          });
+        };
+        reader.readAsDataURL(file);
+      }),
+  );
+  Promise.all(promises).then((attachments) => {
+    onAddAttachments(transcriptId, attachments);
+  });
+}
+
+function PhotoGallery({
+  transcript,
+  onAddAttachments,
+  onRemoveAttachment,
+}: {
+  transcript: Transcript | null;
+  onAddAttachments: (transcriptId: string, attachments: Attachment[]) => void;
+  onRemoveAttachment: (transcriptId: string, attachmentId: string) => void;
+}) {
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const touchStartX = useRef(0);
+
+  const attachments = transcript?.attachments ?? [];
+  const images = attachments.filter((a) => a.mimeType.startsWith("image/"));
+  const docs = attachments.filter((a) => !a.mimeType.startsWith("image/"));
+
+  const handleSwipe = useCallback(
+    (direction: "left" | "right") => {
+      if (lightboxIndex === null) return;
+      if (direction === "left" && lightboxIndex < images.length - 1) {
+        setLightboxIndex(lightboxIndex + 1);
+      } else if (direction === "right" && lightboxIndex > 0) {
+        setLightboxIndex(lightboxIndex - 1);
+      }
+    },
+    [lightboxIndex, images.length],
+  );
+
+  if (!transcript) {
+    return (
+      <div className="flex items-center justify-center h-32 text-sm text-gray-300">
+        Select a transcript to view photos
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-3">
+      {/* Attach button */}
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-xs font-semibold">
+          {attachments.length} attachment{attachments.length !== 1 ? "s" : ""}
+        </h3>
+        <div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*,.pdf,.doc,.docx"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              const files = e.target.files;
+              if (!files || files.length === 0) return;
+              handleFileAttach(files, transcript.id, onAddAttachments);
+              e.target.value = "";
+            }}
+          />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="text-[11px] px-3 py-1 rounded-lg bg-accent text-white font-medium hover:bg-blue-600 active:scale-95"
+          >
+            + Add Photos
+          </button>
+        </div>
+      </div>
+
+      {/* Image grid */}
+      {images.length > 0 && (
+        <div className="grid grid-cols-3 gap-2 mb-3">
+          {images.map((img, i) => (
+            <button
+              key={img.id}
+              onClick={() => setLightboxIndex(i)}
+              className="aspect-square rounded-lg overflow-hidden border border-border relative group"
+            >
+              <img src={img.dataUrl} alt={img.name} className="w-full h-full object-cover" />
+              {/* Delete button on hover */}
+              <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onRemoveAttachment(transcript.id, img.id);
+                  }}
+                  className="w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center text-[10px] shadow"
+                >
+                  x
+                </button>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Documents */}
+      {docs.length > 0 && (
+        <>
+          <h4 className="text-[10px] font-semibold uppercase text-muted mb-1.5">Documents</h4>
+          <div className="space-y-1">
+            {docs.map((doc) => (
+              <div key={doc.id} className="flex items-center gap-2 p-2 rounded-lg bg-gray-50 border border-border group">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-gray-400 shrink-0">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z" />
+                  <polyline points="14 2 14 8 20 8" />
+                </svg>
+                <span className="text-xs truncate flex-1">{doc.name}</span>
+                <button
+                  onClick={() => onRemoveAttachment(transcript.id, doc.id)}
+                  className="opacity-0 group-hover:opacity-100 text-[10px] text-red-500 hover:text-red-700 transition-opacity"
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {attachments.length === 0 && (
+        <div className="flex flex-col items-center justify-center py-8 text-gray-300">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="mb-2">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+            <circle cx="8.5" cy="8.5" r="1.5" />
+            <polyline points="21 15 16 10 5 21" />
+          </svg>
+          <p className="text-xs">No photos or documents</p>
+          <p className="text-[10px] mt-0.5">Tap &quot;+ Add Photos&quot; to attach files</p>
+        </div>
+      )}
+
+      {/* Lightbox overlay */}
+      {lightboxIndex !== null && images[lightboxIndex] && (
+        <div
+          className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center"
+          onClick={() => setLightboxIndex(null)}
+          onTouchStart={(e) => {
+            touchStartX.current = e.touches[0].clientX;
+          }}
+          onTouchEnd={(e) => {
+            const diff = e.changedTouches[0].clientX - touchStartX.current;
+            if (Math.abs(diff) > 50) {
+              handleSwipe(diff < 0 ? "left" : "right");
+              e.stopPropagation();
+            }
+          }}
+        >
+          {/* Close button */}
+          <button
+            onClick={() => setLightboxIndex(null)}
+            className="absolute top-4 right-4 text-white/80 hover:text-white z-10"
+          >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </button>
+
+          {/* Nav arrows */}
+          {lightboxIndex > 0 && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setLightboxIndex(lightboxIndex - 1);
+              }}
+              className="absolute left-3 text-white/70 hover:text-white p-2"
+            >
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <polyline points="15 18 9 12 15 6" />
+              </svg>
+            </button>
+          )}
+          {lightboxIndex < images.length - 1 && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setLightboxIndex(lightboxIndex + 1);
+              }}
+              className="absolute right-3 text-white/70 hover:text-white p-2"
+            >
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <polyline points="9 18 15 12 9 6" />
+              </svg>
+            </button>
+          )}
+
+          {/* Image */}
+          <img
+            src={images[lightboxIndex].dataUrl}
+            alt={images[lightboxIndex].name}
+            className="max-w-[90vw] max-h-[85vh] object-contain rounded-lg"
+            onClick={(e) => e.stopPropagation()}
+          />
+
+          {/* Counter */}
+          <div className="absolute bottom-4 text-white/60 text-xs">
+            {lightboxIndex + 1} / {images.length} — {images[lightboxIndex].name}
+          </div>
         </div>
       )}
     </div>

@@ -1,3 +1,12 @@
+export interface Attachment {
+  id: string;
+  name: string;
+  type: "photo" | "document" | "note";
+  mimeType: string;
+  dataUrl: string; // base64 data URL
+  timestamp?: string; // ISO date-time
+}
+
 export interface Transcript {
   id: string;
   title: string;
@@ -12,6 +21,7 @@ export interface Transcript {
   actionItems: ActionItem[];
   calls: CallItem[];
   errands: ErrandItem[];
+  attachments?: Attachment[];
   pinned?: boolean;
 }
 

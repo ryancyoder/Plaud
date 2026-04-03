@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { Transcript, Client } from "@/lib/types";
+import { Transcript, Attachment, Client } from "@/lib/types";
 import { getWeekDates } from "@/lib/mock-data";
 import { loadTranscripts, saveTranscripts } from "@/lib/store";
 import { loadClients, getTranscriptsForClient } from "@/lib/clients";
@@ -73,6 +73,41 @@ export default function Dashboard() {
 
   const handleClientsChange = useCallback(() => {
     setClients(loadClients());
+  }, []);
+
+  const handleAddAttachments = useCallback((transcriptId: string, newAttachments: Attachment[]) => {
+    setTranscripts((prev) => {
+      const updated = prev.map((t) =>
+        t.id === transcriptId
+          ? { ...t, attachments: [...(t.attachments || []), ...newAttachments] }
+          : t
+      );
+      saveTranscripts(updated);
+      return updated;
+    });
+    // Update selected transcript if it's the one being modified
+    setSelectedTranscript((prev) =>
+      prev?.id === transcriptId
+        ? { ...prev, attachments: [...(prev.attachments || []), ...newAttachments] }
+        : prev
+    );
+  }, []);
+
+  const handleRemoveAttachment = useCallback((transcriptId: string, attachmentId: string) => {
+    setTranscripts((prev) => {
+      const updated = prev.map((t) =>
+        t.id === transcriptId
+          ? { ...t, attachments: (t.attachments || []).filter((a) => a.id !== attachmentId) }
+          : t
+      );
+      saveTranscripts(updated);
+      return updated;
+    });
+    setSelectedTranscript((prev) =>
+      prev?.id === transcriptId
+        ? { ...prev, attachments: (prev.attachments || []).filter((a) => a.id !== attachmentId) }
+        : prev
+    );
   }, []);
 
   const getTranscriptsForDate = useCallback(
@@ -207,6 +242,8 @@ export default function Dashboard() {
             errandItems={errandItems}
             clients={clients}
             onClose={() => setSelectedTranscript(null)}
+            onAddAttachments={handleAddAttachments}
+            onRemoveAttachment={handleRemoveAttachment}
             onAssignClient={(transcriptId, clientName) => {
               setTranscripts((prev) => {
                 const updated = prev.map((t) =>
