@@ -1,6 +1,6 @@
 "use client";
 
-import { Transcript, ActionItem, CallItem, ErrandItem, Tag } from "./types";
+import { Transcript, ActionItem, CallItem, ErrandItem } from "./types";
 import { srtToSegments } from "./srt-parser";
 import { parseJsonTranscripts, isJsonString } from "./json-parser";
 
@@ -15,22 +15,6 @@ interface StoredLists {
 
 function generateId(): string {
   return `t-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function guessTag(fileName: string, text: string): Tag[] {
-  const lower = (fileName + " " + text).toLowerCase();
-  const tags: Tag[] = [];
-  if (lower.includes("call") || lower.includes("phone")) tags.push("call");
-  if (lower.includes("meeting") || lower.includes("standup") || lower.includes("sync"))
-    tags.push("meeting");
-  if (lower.includes("interview")) tags.push("interview");
-  if (lower.includes("doctor") || lower.includes("medical") || lower.includes("dentist"))
-    tags.push("medical");
-  if (lower.includes("errand") || lower.includes("grocery") || lower.includes("store"))
-    tags.push("errand");
-  if (lower.includes("brainstorm") || lower.includes("idea")) tags.push("brainstorm");
-  if (tags.length === 0) tags.push("meeting");
-  return tags;
 }
 
 function truncate(text: string, maxLen: number): string {
@@ -78,7 +62,7 @@ export async function importSrtFile(file: File, recordingStart: Date): Promise<T
     summary: truncate(seg.fullText, 300),
     fullTranscript: seg.fullText,
     participants: seg.participants,
-    tags: guessTag(file.name, seg.fullText),
+    tags: [],
     actionItems: [],
     calls: [],
     errands: [],
@@ -149,7 +133,7 @@ export function importFromText(text: string, recordingStart?: Date): Transcript[
       summary: truncate(seg.fullText, 300),
       fullTranscript: seg.fullText,
       participants: seg.participants,
-      tags: guessTag("", seg.fullText),
+      tags: [],
       actionItems: [],
       calls: [],
       errands: [],
@@ -170,7 +154,7 @@ export function importFromText(text: string, recordingStart?: Date): Transcript[
     duration: 1,
     summary: truncate(trimmed, 300),
     participants: [],
-    tags: guessTag("", trimmed),
+    tags: [],
     actionItems: [],
     calls: [],
     errands: [],
