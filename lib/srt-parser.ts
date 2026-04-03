@@ -88,8 +88,9 @@ export function srtToTranscript(
   fileName: string,
   content: string,
   recordingStart: Date,
+  gapThreshold?: number,
 ): ParsedTranscript {
-  const segments = srtToSegments(fileName, content, recordingStart);
+  const segments = srtToSegments(fileName, content, recordingStart, gapThreshold);
   if (segments.length === 0) {
     throw new Error("No valid SRT entries found in file");
   }
@@ -97,45 +98,71 @@ export function srtToTranscript(
 }
 
 /**
- * Each SRT entry is its own segment/snippet.
- * Convert every entry into a separate ParsedTranscript with absolute timestamps.
+ * Group SRT entries into segments based on silence gaps between them.
+ * Each SRT entry stays whole — entries are grouped when the gap between
+ * consecutive entries is less than `gapThresholdSeconds`.
+ * A gap >= threshold starts a new group/transcript.
+ * Title is the first line of text from the first entry in the group.
  */
 export function srtToSegments(
   fileName: string,
   content: string,
   recordingStart: Date,
+  gapThresholdSeconds = 180,
 ): ParsedTranscript[] {
   let entries = parseSrt(content);
   if (entries.length === 0) return [];
 
   entries = applyAbsoluteTimestamps(entries, recordingStart);
 
-  const baseName = fileName.replace(/\.srt$/i, "").replace(/[_-]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  // Group entries by gap threshold
+  const groups: SrtEntry[][] = [];
+  let currentGroup: SrtEntry[] = [entries[0]];
 
-  return entries.map((entry) => {
-    const durationSeconds = entry.endSeconds - entry.startSeconds;
+  for (let i = 1; i < entries.length; i++) {
+    const prev = entries[i - 1];
+    const curr = entries[i];
+    const gap = curr.startSeconds - prev.endSeconds;
+
+    if (gap >= gapThresholdSeconds) {
+      groups.push(currentGroup);
+      currentGroup = [curr];
+    } else {
+      currentGroup.push(curr);
+    }
+  }
+  groups.push(currentGroup);
+
+  // Convert each group into a ParsedTranscript
+  return groups.map((groupEntries) => {
+    const first = groupEntries[0];
+    const last = groupEntries[groupEntries.length - 1];
+    const durationSeconds = last.endSeconds - first.startSeconds;
     const durationMinutes = Math.max(1, Math.round(durationSeconds / 60));
-    const segStart = entry.absoluteStart || recordingStart;
+    const segStart = first.absoluteStart || recordingStart;
 
-    // Extract speaker if present
+    // Extract unique speakers
     const speakerPattern = /^([A-Z][a-zA-Z\s]+?):\s/;
-    const speakerMatch = entry.text.match(speakerPattern);
-    const participants = speakerMatch ? [speakerMatch[1].trim()] : [];
+    const speakers = new Set<string>();
+    for (const entry of groupEntries) {
+      const match = entry.text.match(speakerPattern);
+      if (match) speakers.add(match[1].trim());
+    }
 
-    // Use first ~60 chars of text as title, or fall back to time-based title
-    const textPreview = entry.text.replace(speakerPattern, "").trim();
-    const title = textPreview.length > 5
-      ? textPreview.slice(0, 60) + (textPreview.length > 60 ? "..." : "")
-      : `${baseName} — ${formatTimeHHMM(segStart)}`;
+    // Title = first line of text from first entry
+    const firstLine = first.text.split("\n")[0].trim();
+    const title = firstLine.length > 0 ? firstLine : formatTimeHHMM(segStart);
+
+    const fullText = groupEntries.map((e) => e.text).join("\n\n");
 
     return {
       fileName,
       date: formatDateYMD(segStart),
       startTime: formatTimeHHMM(segStart),
       duration: durationMinutes,
-      fullText: entry.text,
-      entries: [entry],
-      participants,
+      fullText,
+      entries: groupEntries,
+      participants: Array.from(speakers),
       segmentTitle: title,
     };
   });

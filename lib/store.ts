@@ -45,9 +45,9 @@ export function saveLists(lists: StoredLists): void {
   localStorage.setItem(LISTS_KEY, JSON.stringify(lists));
 }
 
-export async function importSrtFile(file: File, recordingStart: Date): Promise<Transcript[]> {
+export async function importSrtFile(file: File, recordingStart: Date, gapThreshold?: number): Promise<Transcript[]> {
   const content = await file.text();
-  const segments = srtToSegments(file.name, content, recordingStart);
+  const segments = srtToSegments(file.name, content, recordingStart, gapThreshold);
 
   if (segments.length === 0) {
     throw new Error("No valid SRT entries found in file");
@@ -84,13 +84,13 @@ export async function importJsonFile(file: File): Promise<Transcript[]> {
   return parsed;
 }
 
-export async function importFiles(files: FileList, recordingStart?: Date): Promise<Transcript[]> {
+export async function importFiles(files: FileList, recordingStart?: Date, gapThreshold?: number): Promise<Transcript[]> {
   const results: Transcript[] = [];
   for (const file of Array.from(files)) {
     const name = file.name.toLowerCase();
     if (name.endsWith(".srt")) {
       const start = recordingStart || new Date(file.lastModified);
-      const ts = await importSrtFile(file, start);
+      const ts = await importSrtFile(file, start, gapThreshold);
       results.push(...ts);
     } else if (name.endsWith(".json")) {
       const ts = await importJsonFile(file);
@@ -100,7 +100,7 @@ export async function importFiles(files: FileList, recordingStart?: Date): Promi
   return results;
 }
 
-export function importFromText(text: string, recordingStart?: Date): Transcript[] {
+export function importFromText(text: string, recordingStart?: Date, gapThreshold?: number): Transcript[] {
   const trimmed = text.trim();
   if (!trimmed) return [];
 
@@ -121,7 +121,7 @@ export function importFromText(text: string, recordingStart?: Date): Transcript[
   const looksLikeSrt = /\d+\s*\n\d{2}:\d{2}:\d{2}[,.]\d+\s*-->/.test(trimmed);
   if (looksLikeSrt) {
     const start = recordingStart || new Date();
-    const segments = srtToSegments("Pasted Transcript", trimmed, start);
+    const segments = srtToSegments("Pasted Transcript", trimmed, start, gapThreshold);
     if (segments.length === 0) return [];
 
     const newTranscripts: Transcript[] = segments.map((seg) => ({

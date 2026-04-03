@@ -20,6 +20,13 @@ export default function ImportButton({ onImport }: ImportButtonProps) {
   const [showStartPrompt, setShowStartPrompt] = useState(false);
   const [startDate, setStartDate] = useState("");
   const [startTime, setStartTime] = useState("");
+  const [gapThreshold, setGapThreshold] = useState(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("plaud-gap-threshold");
+      return saved ? parseInt(saved) : 180;
+    }
+    return 180;
+  });
 
   // Paste SRT start-time state
   const [pendingPasteText, setPendingPasteText] = useState<string | null>(null);
@@ -54,10 +61,10 @@ export default function ImportButton({ onImport }: ImportButtonProps) {
     }
   }
 
-  async function doImport(files: FileList, recordingStart?: Date) {
+  async function doImport(files: FileList, recordingStart?: Date, gap?: number) {
     setImporting(true);
     try {
-      const imported = await importFiles(files, recordingStart);
+      const imported = await importFiles(files, recordingStart, gap);
       if (imported.length > 0) {
         onImport(imported);
         toast(`${imported.length} transcript${imported.length > 1 ? "s" : ""} imported`);
@@ -83,8 +90,10 @@ export default function ImportButton({ onImport }: ImportButtonProps) {
       toast("Invalid date or time");
       return;
     }
+    // Persist gap setting
+    localStorage.setItem("plaud-gap-threshold", String(gapThreshold));
     setShowStartPrompt(false);
-    doImport(pendingFiles, recordingStart);
+    doImport(pendingFiles, recordingStart, gapThreshold);
     setPendingFiles(null);
   }
 
@@ -132,9 +141,10 @@ export default function ImportButton({ onImport }: ImportButtonProps) {
       toast("Invalid date or time");
       return;
     }
+    localStorage.setItem("plaud-gap-threshold", String(gapThreshold));
     setShowPasteStartPrompt(false);
     try {
-      const transcripts = importFromText(pendingPasteText, recordingStart);
+      const transcripts = importFromText(pendingPasteText, recordingStart, gapThreshold);
       if (transcripts.length > 0) {
         onImport(transcripts);
         toast(`${transcripts.length} transcript${transcripts.length > 1 ? "s" : ""} imported`);
@@ -255,8 +265,10 @@ export default function ImportButton({ onImport }: ImportButtonProps) {
           description="SRT files have relative timestamps. Enter when the recording started so we can plot it on the calendar."
           dateValue={startDate}
           timeValue={startTime}
+          gapValue={gapThreshold}
           onDateChange={setStartDate}
           onTimeChange={setStartTime}
+          onGapChange={setGapThreshold}
           onConfirm={confirmStartTime}
           onCancel={() => {
             setShowStartPrompt(false);
@@ -273,8 +285,10 @@ export default function ImportButton({ onImport }: ImportButtonProps) {
           description="We detected SRT format. Enter when the recording started."
           dateValue={pasteStartDate}
           timeValue={pasteStartTime}
+          gapValue={gapThreshold}
           onDateChange={setPasteStartDate}
           onTimeChange={setPasteStartTime}
+          onGapChange={setGapThreshold}
           onConfirm={confirmPasteStartTime}
           onCancel={() => {
             setShowPasteStartPrompt(false);
@@ -298,8 +312,10 @@ function StartTimeModal({
   description,
   dateValue,
   timeValue,
+  gapValue,
   onDateChange,
   onTimeChange,
+  onGapChange,
   onConfirm,
   onCancel,
 }: {
@@ -307,8 +323,10 @@ function StartTimeModal({
   description: string;
   dateValue: string;
   timeValue: string;
+  gapValue: number;
   onDateChange: (v: string) => void;
   onTimeChange: (v: string) => void;
+  onGapChange: (v: number) => void;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
@@ -344,6 +362,28 @@ function StartTimeModal({
                 onChange={(e) => onTimeChange(e.target.value)}
                 className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-accent"
               />
+            </div>
+            <div>
+              <label className="text-[10px] font-semibold uppercase text-muted block mb-1">
+                Silence Gap for Grouping
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="range"
+                  min={30}
+                  max={600}
+                  step={30}
+                  value={gapValue}
+                  onChange={(e) => onGapChange(parseInt(e.target.value))}
+                  className="flex-1"
+                />
+                <span className="text-xs font-medium tabular-nums w-14 text-right">
+                  {gapValue >= 60 ? `${Math.floor(gapValue / 60)}m${gapValue % 60 ? ` ${gapValue % 60}s` : ""}` : `${gapValue}s`}
+                </span>
+              </div>
+              <p className="text-[10px] text-muted mt-0.5">
+                Segments separated by more than this silence become separate recordings
+              </p>
             </div>
           </div>
         </div>
