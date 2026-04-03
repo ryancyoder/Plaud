@@ -5,6 +5,13 @@ import { Transcript, Attachment, Client } from "@/lib/types";
 import { getWeekDates } from "@/lib/mock-data";
 import { loadTranscripts, saveTranscripts } from "@/lib/store";
 import { loadClients, getTranscriptsForClient } from "@/lib/clients";
+import {
+  saveAttachments as dbSaveAttachments,
+  removeAttachment as dbRemoveAttachment,
+  loadAllAttachments,
+  clearAllAttachments,
+  resizeImage,
+} from "@/lib/attachment-store";
 import WeekCalendar from "@/components/WeekCalendar";
 import SummaryBar from "@/components/SummaryBar";
 import ViewerPanel from "@/components/ViewerPanel";
@@ -31,9 +38,28 @@ export default function Dashboard() {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    setTranscripts(loadTranscripts());
+    const stored = loadTranscripts();
+    // Strip any leftover dataUrl attachments from localStorage (migrated to IndexedDB)
+    const cleaned = stored.map((t) => ({
+      ...t,
+      attachments: (t.attachments || []).map(({ dataUrl, ...rest }) => ({ ...rest, dataUrl: "" })),
+    }));
     setClients(loadClients());
-    setMounted(true);
+
+    // Load attachment data from IndexedDB and merge
+    loadAllAttachments()
+      .then((allAtts) => {
+        const merged = cleaned.map((t) => ({
+          ...t,
+          attachments: allAtts[t.id] || t.attachments || [],
+        }));
+        setTranscripts(merged);
+        setMounted(true);
+      })
+      .catch(() => {
+        setTranscripts(cleaned);
+        setMounted(true);
+      });
   }, []);
 
   const currentWeek = getWeekDates(weekOffset);
@@ -66,6 +92,7 @@ export default function Dashboard() {
   const handleClearData = useCallback(() => {
     if (window.confirm("Clear all imported transcripts? This cannot be undone.")) {
       saveTranscripts([]);
+      clearAllAttachments().catch(() => {});
       setTranscripts([]);
       setSelectedTranscript(null);
     }
@@ -75,32 +102,58 @@ export default function Dashboard() {
     setClients(loadClients());
   }, []);
 
-  const handleAddAttachments = useCallback((transcriptId: string, newAttachments: Attachment[]) => {
+  const handleAddAttachments = useCallback(async (transcriptId: string, newAttachments: Attachment[]) => {
+    // Resize images before storing
+    const processed = await Promise.all(
+      newAttachments.map(async (att) => {
+        if (att.mimeType.startsWith("image/")) {
+          const resized = await resizeImage(att.dataUrl, 1200);
+          return { ...att, dataUrl: resized };
+        }
+        return att;
+      })
+    );
+
+    // Save full data to IndexedDB
+    await dbSaveAttachments(transcriptId, processed);
+
+    // Update in-memory state with full data
     setTranscripts((prev) => {
       const updated = prev.map((t) =>
         t.id === transcriptId
-          ? { ...t, attachments: [...(t.attachments || []), ...newAttachments] }
+          ? { ...t, attachments: [...(t.attachments || []), ...processed] }
           : t
       );
-      saveTranscripts(updated);
+      // Save to localStorage WITHOUT dataUrl (just metadata)
+      const forStorage = updated.map((t) => ({
+        ...t,
+        attachments: (t.attachments || []).map(({ dataUrl, ...rest }) => ({ ...rest, dataUrl: "" })),
+      }));
+      saveTranscripts(forStorage);
       return updated;
     });
-    // Update selected transcript if it's the one being modified
     setSelectedTranscript((prev) =>
       prev?.id === transcriptId
-        ? { ...prev, attachments: [...(prev.attachments || []), ...newAttachments] }
+        ? { ...prev, attachments: [...(prev.attachments || []), ...processed] }
         : prev
     );
   }, []);
 
-  const handleRemoveAttachment = useCallback((transcriptId: string, attachmentId: string) => {
+  const handleRemoveAttachment = useCallback(async (transcriptId: string, attachmentId: string) => {
+    // Remove from IndexedDB
+    await dbRemoveAttachment(attachmentId);
+
     setTranscripts((prev) => {
       const updated = prev.map((t) =>
         t.id === transcriptId
           ? { ...t, attachments: (t.attachments || []).filter((a) => a.id !== attachmentId) }
           : t
       );
-      saveTranscripts(updated);
+      const forStorage = updated.map((t) => ({
+        ...t,
+        attachments: (t.attachments || []).map(({ dataUrl, ...rest }) => ({ ...rest, dataUrl: "" })),
+      }));
+      saveTranscripts(forStorage);
       return updated;
     });
     setSelectedTranscript((prev) =>
