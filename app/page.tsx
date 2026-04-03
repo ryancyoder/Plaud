@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Transcript } from "@/lib/types";
 import { getWeekDates } from "@/lib/mock-data";
-import { loadTranscripts } from "@/lib/store";
+import { loadTranscripts, saveTranscripts } from "@/lib/store";
 import WeekCalendar from "@/components/WeekCalendar";
 import SummaryBar from "@/components/SummaryBar";
 import SidebarLists from "@/components/SidebarLists";
@@ -34,6 +34,13 @@ export default function Dashboard() {
     setTranscripts((prev) => [...prev, ...newTranscripts]);
   }, []);
 
+  const handleClearData = useCallback(() => {
+    if (window.confirm("Clear all imported transcripts? This cannot be undone.")) {
+      saveTranscripts([]);
+      setTranscripts([]);
+    }
+  }, []);
+
   const getTranscriptsForDate = useCallback(
     (date: string) => transcripts.filter((t) => t.date === date),
     [transcripts]
@@ -57,6 +64,14 @@ export default function Dashboard() {
         </div>
         <div className="flex items-center gap-4">
           <ImportButton onImport={handleImport} />
+          {transcripts.length > 0 && (
+            <button
+              onClick={handleClearData}
+              className="px-3 py-2 rounded-lg text-xs font-medium text-red-600 border border-red-200 hover:bg-red-50 active:scale-95 transition-all"
+            >
+              Clear Data
+            </button>
+          )}
           <div className="text-sm text-muted">
             {new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}
           </div>
