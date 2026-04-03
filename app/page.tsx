@@ -475,7 +475,7 @@ export default function Dashboard() {
         </div>
 
         {/* Center: Day Calendar */}
-        <div className="flex-[2] flex flex-col overflow-hidden border-r border-border">
+        <div className="flex-1 flex flex-col overflow-hidden border-r border-border">
           <DayCalendar
             date={selectedDate}
             transcripts={selectedDateTranscripts}
@@ -486,8 +486,8 @@ export default function Dashboard() {
           />
         </div>
 
-        {/* Right: Viewer Panel */}
-        <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Right: Viewer Panel — 50% of screen */}
+        <div className="w-[50vw] shrink-0 flex flex-col overflow-hidden">
           <ViewerPanel
             selectedTranscript={selectedTranscript}
             actionItems={actionItems}
