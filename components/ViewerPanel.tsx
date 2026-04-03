@@ -167,12 +167,9 @@ function TranscriptView({
     <div className="p-4">
       {/* Header */}
       <div className="flex items-start justify-between mb-3">
-        <div>
-          <h2 className="text-lg font-bold leading-tight">{transcript.title}</h2>
-          <p className="text-xs text-muted mt-1">
-            {formatDate(transcript.date)} · {transcript.startTime} · {formatDuration(transcript.duration)}
-          </p>
-        </div>
+        <p className="text-xs text-muted">
+          {formatDate(transcript.date)} · {transcript.startTime} · {formatDuration(transcript.duration)}
+        </p>
         <button onClick={onClose} className="p-1.5 -mr-1 text-muted hover:text-foreground rounded-lg hover:bg-gray-100">
           <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M5 5l10 10M15 5L5 15" />
