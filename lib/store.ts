@@ -105,6 +105,56 @@ export async function importMultipleSrtFiles(files: FileList): Promise<Transcrip
   return results;
 }
 
+export function importFromClipboardText(text: string): Transcript | null {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+
+  // Check if it looks like SRT content (has numbered blocks with timestamps)
+  const looksLikeSrt = /\d+\s*\n\d{2}:\d{2}:\d{2}[,.]\d+\s*-->/.test(trimmed);
+
+  if (looksLikeSrt) {
+    const parsed = srtToTranscript("Pasted Transcript", trimmed);
+    const transcript: Transcript = {
+      id: generateId(),
+      title: `Pasted Recording - ${new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`,
+      date: parsed.date,
+      startTime: parsed.startTime,
+      duration: parsed.duration,
+      summary: truncate(parsed.fullText, 300),
+      participants: parsed.participants,
+      tags: guessTag("", parsed.fullText),
+      actionItems: [],
+      calls: [],
+      errands: [],
+    };
+
+    const transcripts = loadTranscripts();
+    transcripts.push(transcript);
+    saveTranscripts(transcripts);
+    return transcript;
+  }
+
+  // Plain text — treat as a raw transcript note
+  const transcript: Transcript = {
+    id: generateId(),
+    title: `Pasted Note - ${new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`,
+    date: new Date().toISOString().split("T")[0],
+    startTime: new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false }),
+    duration: 1,
+    summary: truncate(trimmed, 300),
+    participants: [],
+    tags: guessTag("", trimmed),
+    actionItems: [],
+    calls: [],
+    errands: [],
+  };
+
+  const transcripts = loadTranscripts();
+  transcripts.push(transcript);
+  saveTranscripts(transcripts);
+  return transcript;
+}
+
 export function deleteTranscript(id: string): void {
   const transcripts = loadTranscripts().filter((t) => t.id !== id);
   saveTranscripts(transcripts);
