@@ -12,7 +12,6 @@ interface DayCalendarProps {
   onSelectTranscript: (transcript: Transcript) => void;
   onDeleteTranscript?: (transcriptId: string) => void;
   selectedTranscriptId?: string;
-  viewMode?: "granular" | "summary";
 }
 
 /** Lightweight markdown-to-HTML for AI summaries */
@@ -30,7 +29,8 @@ function renderMarkdown(md: string): string {
     .replace(/\n/g, "<br>");
 }
 
-export default function DayCalendar({ date, transcripts, onSelectTranscript, onDeleteTranscript, selectedTranscriptId, viewMode = "granular" }: DayCalendarProps) {
+export default function DayCalendar({ date, transcripts, onSelectTranscript, onDeleteTranscript, selectedTranscriptId }: DayCalendarProps) {
+  const [viewMode, setViewMode] = useState<"granular" | "summary">("granular");
   const today = isToday(date);
   const past = isPast(date);
   const sorted = [...transcripts].sort((a, b) => a.startTime.localeCompare(b.startTime));
@@ -52,9 +52,44 @@ export default function DayCalendar({ date, transcripts, onSelectTranscript, onD
             {formatDate(date)}
           </div>
         </div>
-        <div className={`ml-auto text-xs ${today ? "text-white/70" : "text-muted"}`}>
-          {sorted.length} recording{sorted.length !== 1 ? "s" : ""}
-          {sorted.length > 0 && ` · ${formatDuration(sorted.reduce((s, t) => s + t.duration, 0))}`}
+        <div className={`ml-auto flex items-center gap-2.5`}>
+          <span className={`text-xs ${today ? "text-white/70" : "text-muted"}`}>
+            {sorted.length} recording{sorted.length !== 1 ? "s" : ""}
+            {sorted.length > 0 && ` · ${formatDuration(sorted.reduce((s, t) => s + t.duration, 0))}`}
+          </span>
+          {/* Segments / Summary toggle icon */}
+          {sorted.length > 0 && (
+            <button
+              onClick={() => setViewMode((v) => v === "granular" ? "summary" : "granular")}
+              className={`p-1.5 rounded-lg transition-colors ${
+                today
+                  ? "hover:bg-white/20 text-white/80"
+                  : "hover:bg-gray-100 text-muted"
+              }`}
+              title={viewMode === "granular" ? "Show daily summary" : "Show segments"}
+            >
+              {viewMode === "granular" ? (
+                /* List/segments icon */
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="8" y1="6" x2="21" y2="6" />
+                  <line x1="8" y1="12" x2="21" y2="12" />
+                  <line x1="8" y1="18" x2="21" y2="18" />
+                  <line x1="3" y1="6" x2="3.01" y2="6" />
+                  <line x1="3" y1="12" x2="3.01" y2="12" />
+                  <line x1="3" y1="18" x2="3.01" y2="18" />
+                </svg>
+              ) : (
+                /* Summary/document icon */
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <polyline points="14 2 14 8 20 8" />
+                  <line x1="16" y1="13" x2="8" y2="13" />
+                  <line x1="16" y1="17" x2="8" y2="17" />
+                  <polyline points="10 9 9 9 8 9" />
+                </svg>
+              )}
+            </button>
+          )}
         </div>
       </div>
 

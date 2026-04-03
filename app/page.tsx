@@ -50,7 +50,6 @@ export default function Dashboard() {
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [weekOffset, setWeekOffset] = useState(0);
   const [selectedDate, setSelectedDate] = useState(todayDateStr());
-  const [viewMode, setViewMode] = useState<"granular" | "summary">("granular");
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>("calendar");
   const [pendingPhotoCount, setPendingPhotoCount] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
@@ -381,29 +380,6 @@ export default function Dashboard() {
               <circle cx="12" cy="12" r="3" />
             </svg>
           </button>
-          {/* View mode toggle */}
-          <div className="flex rounded-lg border border-border overflow-hidden">
-            <button
-              onClick={() => setViewMode("granular")}
-              className={`px-2.5 py-1.5 text-[10px] font-medium transition-colors ${
-                viewMode === "granular"
-                  ? "bg-accent text-white"
-                  : "text-muted hover:bg-gray-50"
-              }`}
-            >
-              Segments
-            </button>
-            <button
-              onClick={() => setViewMode("summary")}
-              className={`px-2.5 py-1.5 text-[10px] font-medium transition-colors border-l border-border ${
-                viewMode === "summary"
-                  ? "bg-accent text-white"
-                  : "text-muted hover:bg-gray-50"
-              }`}
-            >
-              Daily Summary
-            </button>
-          </div>
           <ImportButton onImport={handleImport} />
           <BatchPhotoImport transcripts={transcripts} onPhotosMatched={handleBatchPhotos} pendingCount={pendingPhotoCount} />
           {transcripts.length > 0 && (
@@ -482,7 +458,6 @@ export default function Dashboard() {
             onSelectTranscript={setSelectedTranscript}
             onDeleteTranscript={handleDeleteTranscript}
             selectedTranscriptId={selectedTranscript?.id}
-            viewMode={viewMode}
           />
         </div>
 
