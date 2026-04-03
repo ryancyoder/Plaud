@@ -16,6 +16,7 @@ import {
   resizeImage,
 } from "@/lib/attachment-store";
 import { matchPhotoToTranscript, PhotoMatchResult } from "@/lib/photo-matcher";
+import { hasApiKey, processSegmentWithAI } from "@/lib/claude-api";
 import WeekCalendar from "@/components/WeekCalendar";
 import SummaryBar from "@/components/SummaryBar";
 import ViewerPanel from "@/components/ViewerPanel";
@@ -163,6 +164,34 @@ export default function Dashboard() {
       rematchPendingPhotos(updated);
       return updated;
     });
+
+    // Auto-process segments with AI in background (if API key is set)
+    if (hasApiKey()) {
+      (async () => {
+        for (const t of newTranscripts) {
+          try {
+            const result = await processSegmentWithAI(t.fullTranscript || t.summary || "");
+            if (!result) break; // no API key
+            setTranscripts((prev) => {
+              const updated = prev.map((p) =>
+                p.id === t.id ? { ...p, title: result.title, summary: result.summary } : p
+              );
+              saveTranscripts(updated.map((p) => ({
+                ...p,
+                attachments: (p.attachments || []).map(({ dataUrl, ...rest }) => ({ ...rest, dataUrl: "" })),
+              })));
+              return updated;
+            });
+            // Update selected transcript if it matches
+            setSelectedTranscript((prev) =>
+              prev?.id === t.id ? { ...prev, title: result.title, summary: result.summary } : prev
+            );
+          } catch {
+            // Silently skip failed segments (rate limit, etc.)
+          }
+        }
+      })();
+    }
   }, [rematchPendingPhotos]);
 
   const handleClearData = useCallback(() => {

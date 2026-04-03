@@ -114,23 +114,24 @@ function TranscriptView({
   onAddAttachments: (transcriptId: string, attachments: Attachment[]) => void;
 }) {
   const [showAssign, setShowAssign] = useState(false);
-  const [transcriptMode, setTranscriptMode] = useState<"raw" | "summary">("raw");
-  const [aiSummary, setAiSummary] = useState<string | null>(null);
+  const [transcriptMode, setTranscriptMode] = useState<"summary" | "raw">("summary");
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Load cached summary when transcript changes
+  // Reset mode when transcript changes
   useEffect(() => {
     if (transcript) {
-      const cached = getCachedSegmentSummary(transcript.id);
-      setAiSummary(cached);
+      setTranscriptMode("summary");
       setSummaryError(null);
-    } else {
-      setAiSummary(null);
-      setTranscriptMode("raw");
     }
   }, [transcript?.id]);
+
+  // The summary comes from transcript.summary (set during AI import processing)
+  // Also check the segment summary cache as fallback
+  const aiSummary = transcript
+    ? getCachedSegmentSummary(transcript.id) || transcript.summary
+    : null;
 
   const handleGenerateSummary = async () => {
     if (!transcript) return;
@@ -138,8 +139,7 @@ function TranscriptView({
     setSummaryError(null);
     try {
       const text = transcript.fullTranscript || transcript.summary || "";
-      const result = await generateSegmentSummary(transcript.id, transcript.title, text);
-      setAiSummary(result);
+      await generateSegmentSummary(transcript.id, transcript.title, text);
       setTranscriptMode("summary");
     } catch (err) {
       setSummaryError(err instanceof Error ? err.message : "Failed to generate summary");
@@ -256,46 +256,36 @@ function TranscriptView({
         </div>
       )}
 
-      {/* Transcript / Summary toggle */}
+      {/* Summary / Transcript toggle */}
       <div className="mb-3">
         <div className="flex items-center gap-2 mb-2">
           <div className="flex rounded-lg border border-border overflow-hidden">
             <button
-              onClick={() => setTranscriptMode("raw")}
+              onClick={() => setTranscriptMode("summary")}
               className={`px-2.5 py-1 text-[10px] font-medium transition-colors ${
+                transcriptMode === "summary" ? "bg-purple-600 text-white" : "text-muted hover:bg-gray-50"
+              }`}
+            >
+              Summary
+            </button>
+            <button
+              onClick={() => setTranscriptMode("raw")}
+              className={`px-2.5 py-1 text-[10px] font-medium transition-colors border-l border-border ${
                 transcriptMode === "raw" ? "bg-accent text-white" : "text-muted hover:bg-gray-50"
               }`}
             >
               Transcript
             </button>
-            <button
-              onClick={() => {
-                if (aiSummary) {
-                  setTranscriptMode("summary");
-                } else if (hasApiKey()) {
-                  handleGenerateSummary();
-                }
-              }}
-              disabled={summaryLoading}
-              className={`px-2.5 py-1 text-[10px] font-medium transition-colors border-l border-border ${
-                transcriptMode === "summary" ? "bg-purple-600 text-white" : "text-muted hover:bg-gray-50"
-              } disabled:opacity-50`}
-            >
-              {summaryLoading ? "Generating..." : "AI Summary"}
-            </button>
           </div>
-          {transcriptMode === "summary" && aiSummary && (
+          {transcriptMode === "summary" && hasApiKey() && (
             <button
               onClick={handleGenerateSummary}
               disabled={summaryLoading}
               className="text-[10px] text-muted hover:text-purple-600 disabled:opacity-50"
               title="Regenerate summary"
             >
-              ↻ Regenerate
+              {summaryLoading ? "Generating..." : "↻ Regenerate"}
             </button>
-          )}
-          {!hasApiKey() && transcriptMode === "raw" && (
-            <span className="text-[10px] text-gray-400">Set API key in settings for AI summaries</span>
           )}
         </div>
 
@@ -303,26 +293,17 @@ function TranscriptView({
           <p className="text-[10px] text-red-500 mb-2">{summaryError}</p>
         )}
 
-        {transcriptMode === "summary" && aiSummary ? (
+        {transcriptMode === "summary" ? (
           <div
             className="text-sm text-gray-700 leading-relaxed prose-sm"
-            dangerouslySetInnerHTML={{ __html: renderMarkdown(aiSummary) }}
+            dangerouslySetInnerHTML={{ __html: renderMarkdown(aiSummary || transcript.summary || "") }}
           />
         ) : (
-          <>
-            {transcript.summary && (
-              <div className="mb-2">
-                <h3 className="text-[10px] font-semibold uppercase text-muted mb-0.5">Summary</h3>
-                <p className="text-sm leading-relaxed whitespace-pre-wrap">{transcript.summary}</p>
-              </div>
-            )}
-            {transcript.fullTranscript && transcript.fullTranscript !== transcript.summary && (
-              <div>
-                <h3 className="text-[10px] font-semibold uppercase text-muted mb-0.5">Full Transcript</h3>
-                <p className="text-sm leading-relaxed whitespace-pre-wrap text-gray-700">{transcript.fullTranscript}</p>
-              </div>
-            )}
-          </>
+          <div>
+            <p className="text-sm leading-relaxed whitespace-pre-wrap text-gray-700">
+              {transcript.fullTranscript || transcript.summary}
+            </p>
+          </div>
         )}
       </div>
 

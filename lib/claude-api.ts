@@ -17,6 +17,40 @@ export function hasApiKey(): boolean {
   return getApiKey().length > 0;
 }
 
+// --- Shared Claude API call ---
+
+async function callClaude(prompt: string): Promise<string> {
+  const apiKey = getApiKey();
+  if (!apiKey) throw new Error("No Claude API key configured");
+
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true",
+    },
+    body: JSON.stringify({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 1024,
+      messages: [{ role: "user", content: prompt }],
+    }),
+  });
+
+  if (!response.ok) {
+    const err = await response.text();
+    if (response.status === 401) throw new Error("Invalid API key");
+    if (response.status === 429) throw new Error("Rate limited — try again in a moment");
+    throw new Error(`API error ${response.status}: ${err}`);
+  }
+
+  const data = await response.json();
+  return data.content?.[0]?.text || "";
+}
+
+// --- Daily summary cache ---
+
 interface CachedSummary {
   date: string;
   summary: string;
@@ -51,7 +85,7 @@ export function clearCachedSummaries(): void {
   localStorage.removeItem(SEGMENT_SUMMARIES_STORAGE);
 }
 
-// --- Segment (individual transcript) summaries ---
+// --- Segment summary cache ---
 
 function loadCachedSegmentSummaries(): Record<string, string> {
   if (typeof window === "undefined") return {};
@@ -69,17 +103,13 @@ function saveSegmentSummaryToCache(transcriptId: string, summary: string): void 
   localStorage.setItem(SEGMENT_SUMMARIES_STORAGE, JSON.stringify(cache));
 }
 
-/**
- * Call the Claude API to generate a summary for a single transcript segment.
- */
+// --- Segment summary generation ---
+
 export async function generateSegmentSummary(
   transcriptId: string,
   title: string,
   text: string,
 ): Promise<string> {
-  const apiKey = getApiKey();
-  if (!apiKey) throw new Error("No Claude API key configured");
-
   const prompt = `Summarize this voice recording transcript concisely. Highlight key points, decisions, action items, and people mentioned. Use markdown with bullet points. Keep it under 300 words.
 
 TITLE: ${title}
@@ -87,34 +117,44 @@ TITLE: ${title}
 TRANSCRIPT:
 ${text}`;
 
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-      "anthropic-dangerous-direct-browser-access": "true",
-    },
-    body: JSON.stringify({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 1024,
-      messages: [{ role: "user", content: prompt }],
-    }),
-  });
-
-  if (!response.ok) {
-    const err = await response.text();
-    if (response.status === 401) throw new Error("Invalid API key");
-    if (response.status === 429) throw new Error("Rate limited — try again in a moment");
-    throw new Error(`API error ${response.status}: ${err}`);
-  }
-
-  const data = await response.json();
-  const summary = data.content?.[0]?.text || "";
-
-  saveSegmentSummaryToCache(transcriptId, summary);
-  return summary;
+  const result = await callClaude(prompt);
+  saveSegmentSummaryToCache(transcriptId, result);
+  return result;
 }
+
+/**
+ * Process a transcript segment to generate both an AI title and summary.
+ * Returns { title, summary } or null if no API key.
+ */
+export async function processSegmentWithAI(
+  text: string,
+): Promise<{ title: string; summary: string } | null> {
+  if (!hasApiKey()) return null;
+
+  const prompt = `Analyze this voice recording transcript and provide:
+1. A SHORT TITLE (max 60 characters) — a descriptive label for this recording segment
+2. A CONCISE SUMMARY — key points, decisions, action items, and people mentioned. Use markdown with bullet points. Keep under 300 words.
+
+Respond in this exact format:
+TITLE: <your title here>
+SUMMARY:
+<your summary here>
+
+TRANSCRIPT:
+${text}`;
+
+  const result = await callClaude(prompt);
+
+  const titleMatch = result.match(/^TITLE:\s*(.+)/m);
+  const summaryMatch = result.match(/SUMMARY:\n?([\s\S]+)/);
+
+  return {
+    title: titleMatch?.[1]?.trim().slice(0, 60) || "Untitled Segment",
+    summary: summaryMatch?.[1]?.trim() || result,
+  };
+}
+
+// --- Daily summary generation ---
 
 interface Segment {
   startTime: string;
@@ -123,19 +163,12 @@ interface Segment {
   text: string;
 }
 
-/**
- * Call the Claude API to generate a daily summary from transcript segments.
- * Uses the Messages API directly via fetch (no SDK needed for static site).
- */
 export async function generateDailySummary(
   date: string,
   segments: Segment[],
 ): Promise<string> {
-  const apiKey = getApiKey();
-  if (!apiKey) throw new Error("No Claude API key configured");
-
   const segmentText = segments
-    .map((s, i) => `[${s.startTime}] (${s.duration}min) ${s.title}\n${s.text}`)
+    .map((s) => `[${s.startTime}] (${s.duration}min) ${s.title}\n${s.text}`)
     .join("\n\n---\n\n");
 
   const prompt = `You are summarizing a day's worth of voice recordings from ${date}. Below are the transcript segments from that day, each with a timestamp and duration.
@@ -153,37 +186,8 @@ TRANSCRIPT SEGMENTS:
 
 ${segmentText}`;
 
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-      "anthropic-dangerous-direct-browser-access": "true",
-    },
-    body: JSON.stringify({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 1024,
-      messages: [
-        {
-          role: "user",
-          content: prompt,
-        },
-      ],
-    }),
-  });
+  const text = await callClaude(prompt);
 
-  if (!response.ok) {
-    const err = await response.text();
-    if (response.status === 401) throw new Error("Invalid API key");
-    if (response.status === 429) throw new Error("Rate limited — try again in a moment");
-    throw new Error(`API error ${response.status}: ${err}`);
-  }
-
-  const data = await response.json();
-  const text = data.content?.[0]?.text || "";
-
-  // Cache the result
   saveCachedSummary({
     date,
     summary: text,
