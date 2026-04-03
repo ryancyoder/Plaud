@@ -82,7 +82,7 @@ export interface ParsedTranscript {
 }
 
 /**
- * Parse an SRT file into a single transcript (legacy, used for short files).
+ * Parse an SRT file into a single transcript (legacy).
  */
 export function srtToTranscript(
   fileName: string,
@@ -93,79 +93,50 @@ export function srtToTranscript(
   if (segments.length === 0) {
     throw new Error("No valid SRT entries found in file");
   }
-  // If only one segment, return it directly
-  if (segments.length === 1) return segments[0];
-  // Otherwise merge into one (shouldn't normally be called for multi-segment)
   return segments[0];
 }
 
 /**
- * Split an SRT file into multiple segments based on gaps in speech.
- * A gap of `gapThresholdSeconds` or more between entries starts a new segment.
- * Each segment becomes its own transcript with absolute timestamps.
+ * Each SRT entry is its own segment/snippet.
+ * Convert every entry into a separate ParsedTranscript with absolute timestamps.
  */
 export function srtToSegments(
   fileName: string,
   content: string,
   recordingStart: Date,
-  gapThresholdSeconds = 60,
 ): ParsedTranscript[] {
   let entries = parseSrt(content);
   if (entries.length === 0) return [];
 
-  // Apply absolute timestamps
   entries = applyAbsoluteTimestamps(entries, recordingStart);
 
-  // Group entries into segments by detecting gaps
-  const segments: SrtEntry[][] = [];
-  let currentSegment: SrtEntry[] = [entries[0]];
-
-  for (let i = 1; i < entries.length; i++) {
-    const prev = entries[i - 1];
-    const curr = entries[i];
-    const gap = curr.startSeconds - prev.endSeconds;
-
-    if (gap >= gapThresholdSeconds) {
-      segments.push(currentSegment);
-      currentSegment = [curr];
-    } else {
-      currentSegment.push(curr);
-    }
-  }
-  segments.push(currentSegment);
-
-  // Convert each segment group into a ParsedTranscript
   const baseName = fileName.replace(/\.srt$/i, "").replace(/[_-]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
-  return segments.map((segEntries, idx) => {
-    const first = segEntries[0];
-    const last = segEntries[segEntries.length - 1];
-    const durationSeconds = last.endSeconds - first.startSeconds;
+  return entries.map((entry) => {
+    const durationSeconds = entry.endSeconds - entry.startSeconds;
     const durationMinutes = Math.max(1, Math.round(durationSeconds / 60));
+    const segStart = entry.absoluteStart || recordingStart;
 
-    // Extract speakers
+    // Extract speaker if present
     const speakerPattern = /^([A-Z][a-zA-Z\s]+?):\s/;
-    const speakers = new Set<string>();
-    for (const entry of segEntries) {
-      const match = entry.text.match(speakerPattern);
-      if (match) speakers.add(match[1].trim());
-    }
+    const speakerMatch = entry.text.match(speakerPattern);
+    const participants = speakerMatch ? [speakerMatch[1].trim()] : [];
 
-    const fullText = segEntries.map((e) => e.text).join(" ");
-    const segStart = first.absoluteStart || recordingStart;
+    // Use first ~60 chars of text as title, or fall back to time-based title
+    const textPreview = entry.text.replace(speakerPattern, "").trim();
+    const title = textPreview.length > 5
+      ? textPreview.slice(0, 60) + (textPreview.length > 60 ? "..." : "")
+      : `${baseName} — ${formatTimeHHMM(segStart)}`;
 
     return {
       fileName,
       date: formatDateYMD(segStart),
       startTime: formatTimeHHMM(segStart),
       duration: durationMinutes,
-      fullText,
-      entries: segEntries,
-      participants: Array.from(speakers),
-      // Add a readable title with segment number and time
-      segmentTitle: segments.length > 1
-        ? `${baseName} — Segment ${idx + 1} (${formatTimeHHMM(segStart)})`
-        : baseName,
+      fullText: entry.text,
+      entries: [entry],
+      participants,
+      segmentTitle: title,
     };
   });
 }
