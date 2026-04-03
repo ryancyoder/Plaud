@@ -17,13 +17,16 @@ import {
 } from "@/lib/attachment-store";
 import { matchPhotoToTranscript, PhotoMatchResult } from "@/lib/photo-matcher";
 import { hasApiKey, processSegmentWithAI } from "@/lib/claude-api";
-import WeekCalendar from "@/components/WeekCalendar";
-import SummaryBar from "@/components/SummaryBar";
+import { isToday } from "@/lib/utils";
+import DayCalendar from "@/components/DayCalendar";
 import ViewerPanel from "@/components/ViewerPanel";
 import ClientRoster from "@/components/ClientRoster";
+import WeekNav from "@/components/WeekNav";
 import ImportButton from "@/components/ImportButton";
 import BatchPhotoImport from "@/components/BatchPhotoImport";
 import SettingsModal from "@/components/SettingsModal";
+
+type SidebarTab = "calendar" | "contacts";
 
 function getWeekLabel(weekDates: string[]): string {
   const start = new Date(weekDates[0] + "T00:00:00");
@@ -35,27 +38,32 @@ function getWeekLabel(weekDates: string[]): string {
   return `${start.toLocaleDateString("en-US", opts)} – ${end.toLocaleDateString("en-US", opts)}, ${start.getFullYear()}`;
 }
 
+function todayDateStr(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 export default function Dashboard() {
   const [selectedTranscript, setSelectedTranscript] = useState<Transcript | null>(null);
   const [transcripts, setTranscripts] = useState<Transcript[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [weekOffset, setWeekOffset] = useState(0);
+  const [selectedDate, setSelectedDate] = useState(todayDateStr());
   const [viewMode, setViewMode] = useState<"granular" | "summary">("granular");
+  const [sidebarTab, setSidebarTab] = useState<SidebarTab>("calendar");
   const [pendingPhotoCount, setPendingPhotoCount] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     const stored = loadTranscripts();
-    // Strip any leftover dataUrl attachments from localStorage (migrated to IndexedDB)
     const cleaned = stored.map((t) => ({
       ...t,
       attachments: (t.attachments || []).map(({ dataUrl, ...rest }) => ({ ...rest, dataUrl: "" })),
     }));
     setClients(loadClients());
 
-    // Load attachment data from IndexedDB and merge
     Promise.all([loadAllAttachments(), loadPendingPhotos()])
       .then(([allAtts, pending]) => {
         const merged = cleaned.map((t) => ({
@@ -74,19 +82,30 @@ export default function Dashboard() {
 
   const currentWeek = getWeekDates(weekOffset);
 
+  // Keep selectedDate in sync with week navigation
+  useEffect(() => {
+    if (!currentWeek.includes(selectedDate)) {
+      // Find today in the new week, or default to Monday
+      const todayInWeek = currentWeek.find((d) => isToday(d));
+      setSelectedDate(todayInWeek || currentWeek[0]);
+    }
+  }, [currentWeek, selectedDate]);
+
   // Filter transcripts by selected client
   const visibleTranscripts = useMemo(() => {
     if (!selectedClient) return transcripts;
     return getTranscriptsForClient(transcripts, selectedClient);
   }, [transcripts, selectedClient]);
 
-  const currentWeekTranscripts = visibleTranscripts.filter((t) => currentWeek.includes(t.date));
+  const selectedDateTranscripts = useMemo(
+    () => visibleTranscripts.filter((t) => t.date === selectedDate),
+    [visibleTranscripts, selectedDate]
+  );
 
   const actionItems = visibleTranscripts.flatMap((t) => t.actionItems);
   const callItems = visibleTranscripts.flatMap((t) => t.calls);
   const errandItems = visibleTranscripts.flatMap((t) => t.errands);
 
-  // Count transcripts per client for badges
   const transcriptCountByClient = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const client of clients) {
@@ -125,13 +144,10 @@ export default function Dashboard() {
 
     if (matched.size > 0) {
       const results = Array.from(matched.values());
-      // Save matched to IndexedDB
       for (const r of results) {
         await dbSaveAttachments(r.transcriptId, r.attachments);
       }
-      // Remove matched from pending
       await removePendingPhotos(matchedIds);
-      // Update transcript state
       setTranscripts((prev) => {
         const updated = prev.map((t) => {
           const m = results.find((r) => r.transcriptId === t.id);
@@ -145,7 +161,6 @@ export default function Dashboard() {
         saveTranscripts(forStorage);
         return updated;
       });
-      // Update selected transcript if affected
       setSelectedTranscript((prev) => {
         if (!prev) return prev;
         const m = results.find((r) => r.transcriptId === prev.id);
@@ -160,18 +175,16 @@ export default function Dashboard() {
   const handleImport = useCallback((newTranscripts: Transcript[]) => {
     setTranscripts((prev) => {
       const updated = [...prev, ...newTranscripts];
-      // Trigger re-match of pending photos with the full set
       rematchPendingPhotos(updated);
       return updated;
     });
 
-    // Auto-process segments with AI in background (if API key is set)
     if (hasApiKey()) {
       (async () => {
         for (const t of newTranscripts) {
           try {
             const result = await processSegmentWithAI(t.fullTranscript || t.summary || "");
-            if (!result) break; // no API key
+            if (!result) break;
             setTranscripts((prev) => {
               const updated = prev.map((p) =>
                 p.id === t.id ? { ...p, title: result.title, summary: result.summary } : p
@@ -182,12 +195,11 @@ export default function Dashboard() {
               })));
               return updated;
             });
-            // Update selected transcript if it matches
             setSelectedTranscript((prev) =>
               prev?.id === t.id ? { ...prev, title: result.title, summary: result.summary } : prev
             );
           } catch {
-            // Silently skip failed segments (rate limit, etc.)
+            // Silently skip failed segments
           }
         }
       })();
@@ -222,7 +234,6 @@ export default function Dashboard() {
   }, []);
 
   const handleAddAttachments = useCallback(async (transcriptId: string, newAttachments: Attachment[]) => {
-    // Resize images before storing
     const processed = await Promise.all(
       newAttachments.map(async (att) => {
         if (att.mimeType.startsWith("image/")) {
@@ -233,17 +244,14 @@ export default function Dashboard() {
       })
     );
 
-    // Save full data to IndexedDB
     await dbSaveAttachments(transcriptId, processed);
 
-    // Update in-memory state with full data
     setTranscripts((prev) => {
       const updated = prev.map((t) =>
         t.id === transcriptId
           ? { ...t, attachments: [...(t.attachments || []), ...processed] }
           : t
       );
-      // Save to localStorage WITHOUT dataUrl (just metadata)
       const forStorage = updated.map((t) => ({
         ...t,
         attachments: (t.attachments || []).map(({ dataUrl, ...rest }) => ({ ...rest, dataUrl: "" })),
@@ -259,7 +267,6 @@ export default function Dashboard() {
   }, []);
 
   const handleRemoveAttachment = useCallback(async (transcriptId: string, attachmentId: string) => {
-    // Remove from IndexedDB
     await dbRemoveAttachment(attachmentId);
 
     setTranscripts((prev) => {
@@ -283,12 +290,10 @@ export default function Dashboard() {
   }, []);
 
   const handleBatchPhotos = useCallback(async (results: PhotoMatchResult[]) => {
-    // Save all matched attachments to IndexedDB
     for (const r of results) {
       await dbSaveAttachments(r.transcriptId, r.attachments);
     }
 
-    // Update in-memory transcript state
     setTranscripts((prev) => {
       const updated = prev.map((t) => {
         const match = results.find((r) => r.transcriptId === t.id);
@@ -303,7 +308,6 @@ export default function Dashboard() {
       return updated;
     });
 
-    // Update selected transcript if affected
     setSelectedTranscript((prev) => {
       if (!prev) return prev;
       const match = results.find((r) => r.transcriptId === prev.id);
@@ -311,7 +315,6 @@ export default function Dashboard() {
       return { ...prev, attachments: [...(prev.attachments || []), ...match.attachments] };
     });
 
-    // Refresh pending count
     loadPendingPhotos().then((p) => setPendingPhotoCount(p.length)).catch(() => {});
   }, []);
 
@@ -388,7 +391,7 @@ export default function Dashboard() {
                   : "text-muted hover:bg-gray-50"
               }`}
             >
-              Granular
+              Segments
             </button>
             <button
               onClick={() => setViewMode("summary")}
@@ -416,39 +419,71 @@ export default function Dashboard() {
 
       {/* Three-panel layout */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Left: Client Roster */}
-        <div className="w-56 shrink-0 border-r border-border overflow-hidden">
-          <ClientRoster
-            clients={clients}
-            selectedClientId={selectedClient?.id || null}
-            onSelectClient={setSelectedClient}
-            onClientsChange={handleClientsChange}
-            transcriptCountByClient={transcriptCountByClient}
-          />
+        {/* Left: Sidebar with tab toggle */}
+        <div className="w-56 shrink-0 border-r border-border overflow-hidden flex flex-col">
+          {/* Sidebar tab switcher */}
+          <div className="shrink-0 flex border-b border-border">
+            <button
+              onClick={() => setSidebarTab("calendar")}
+              className={`flex-1 py-2 text-center text-xs font-medium transition-colors relative ${
+                sidebarTab === "calendar" ? "text-accent" : "text-muted hover:text-foreground"
+              }`}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="inline-block mr-1 -mt-0.5">
+                <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+                <line x1="16" y1="2" x2="16" y2="6" />
+                <line x1="8" y1="2" x2="8" y2="6" />
+                <line x1="3" y1="10" x2="21" y2="10" />
+              </svg>
+              Week
+              {sidebarTab === "calendar" && <div className="absolute bottom-0 left-2 right-2 h-0.5 bg-accent rounded-full" />}
+            </button>
+            <button
+              onClick={() => setSidebarTab("contacts")}
+              className={`flex-1 py-2 text-center text-xs font-medium transition-colors relative ${
+                sidebarTab === "contacts" ? "text-accent" : "text-muted hover:text-foreground"
+              }`}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="inline-block mr-1 -mt-0.5">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                <circle cx="12" cy="7" r="4" />
+              </svg>
+              Contacts
+              {sidebarTab === "contacts" && <div className="absolute bottom-0 left-2 right-2 h-0.5 bg-accent rounded-full" />}
+            </button>
+          </div>
+
+          {/* Sidebar content */}
+          <div className="flex-1 overflow-hidden">
+            {sidebarTab === "calendar" ? (
+              <WeekNav
+                weekDates={currentWeek}
+                selectedDate={selectedDate}
+                onSelectDate={setSelectedDate}
+                getTranscriptsForDate={getTranscriptsForDate}
+              />
+            ) : (
+              <ClientRoster
+                clients={clients}
+                selectedClientId={selectedClient?.id || null}
+                onSelectClient={setSelectedClient}
+                onClientsChange={handleClientsChange}
+                transcriptCountByClient={transcriptCountByClient}
+              />
+            )}
+          </div>
         </div>
 
-        {/* Center: Calendar */}
+        {/* Center: Day Calendar */}
         <div className="flex-[2] flex flex-col overflow-hidden border-r border-border">
-          {/* Summary bar */}
-          <div className="shrink-0 p-3 pb-0">
-            <SummaryBar
-              label={selectedClient ? `${selectedClient.name} — ${getWeekLabel(currentWeek)}` : getWeekLabel(currentWeek)}
-              transcripts={currentWeekTranscripts}
-              variant={isCurrentWeek ? "this-week" : "next-week"}
-            />
-          </div>
-
-          {/* Calendar rows */}
-          <div className="flex-1 p-3 overflow-y-auto">
-            <WeekCalendar
-              weekDates={currentWeek}
-              onSelectTranscript={setSelectedTranscript}
-              onDeleteTranscript={handleDeleteTranscript}
-              getTranscriptsForDate={getTranscriptsForDate}
-              selectedTranscriptId={selectedTranscript?.id}
-              viewMode={viewMode}
-            />
-          </div>
+          <DayCalendar
+            date={selectedDate}
+            transcripts={selectedDateTranscripts}
+            onSelectTranscript={setSelectedTranscript}
+            onDeleteTranscript={handleDeleteTranscript}
+            selectedTranscriptId={selectedTranscript?.id}
+            viewMode={viewMode}
+          />
         </div>
 
         {/* Right: Viewer Panel */}
