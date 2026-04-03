@@ -2,6 +2,7 @@
 
 const API_KEY_STORAGE = "plaud-claude-api-key";
 const SUMMARIES_STORAGE = "plaud-daily-summaries";
+const SEGMENT_SUMMARIES_STORAGE = "plaud-segment-summaries";
 
 export function getApiKey(): string {
   if (typeof window === "undefined") return "";
@@ -47,6 +48,72 @@ export function getCachedSummaryMeta(date: string): CachedSummary | null {
 
 export function clearCachedSummaries(): void {
   localStorage.removeItem(SUMMARIES_STORAGE);
+  localStorage.removeItem(SEGMENT_SUMMARIES_STORAGE);
+}
+
+// --- Segment (individual transcript) summaries ---
+
+function loadCachedSegmentSummaries(): Record<string, string> {
+  if (typeof window === "undefined") return {};
+  const stored = localStorage.getItem(SEGMENT_SUMMARIES_STORAGE);
+  return stored ? JSON.parse(stored) : {};
+}
+
+export function getCachedSegmentSummary(transcriptId: string): string | null {
+  return loadCachedSegmentSummaries()[transcriptId] || null;
+}
+
+function saveSegmentSummaryToCache(transcriptId: string, summary: string): void {
+  const cache = loadCachedSegmentSummaries();
+  cache[transcriptId] = summary;
+  localStorage.setItem(SEGMENT_SUMMARIES_STORAGE, JSON.stringify(cache));
+}
+
+/**
+ * Call the Claude API to generate a summary for a single transcript segment.
+ */
+export async function generateSegmentSummary(
+  transcriptId: string,
+  title: string,
+  text: string,
+): Promise<string> {
+  const apiKey = getApiKey();
+  if (!apiKey) throw new Error("No Claude API key configured");
+
+  const prompt = `Summarize this voice recording transcript concisely. Highlight key points, decisions, action items, and people mentioned. Use markdown with bullet points. Keep it under 300 words.
+
+TITLE: ${title}
+
+TRANSCRIPT:
+${text}`;
+
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true",
+    },
+    body: JSON.stringify({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 1024,
+      messages: [{ role: "user", content: prompt }],
+    }),
+  });
+
+  if (!response.ok) {
+    const err = await response.text();
+    if (response.status === 401) throw new Error("Invalid API key");
+    if (response.status === 429) throw new Error("Rate limited — try again in a moment");
+    throw new Error(`API error ${response.status}: ${err}`);
+  }
+
+  const data = await response.json();
+  const summary = data.content?.[0]?.text || "";
+
+  saveSegmentSummaryToCache(transcriptId, summary);
+  return summary;
 }
 
 interface Segment {

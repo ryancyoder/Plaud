@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { Transcript, Attachment, ActionItem, CallItem, ErrandItem, Client } from "@/lib/types";
 import { formatDuration, getTagColor, formatDate } from "@/lib/utils";
+import { hasApiKey, getCachedSegmentSummary, generateSegmentSummary } from "@/lib/claude-api";
 
 type Tab = "transcript" | "photos" | "todos" | "calls" | "errands";
 
@@ -113,7 +114,40 @@ function TranscriptView({
   onAddAttachments: (transcriptId: string, attachments: Attachment[]) => void;
 }) {
   const [showAssign, setShowAssign] = useState(false);
+  const [transcriptMode, setTranscriptMode] = useState<"raw" | "summary">("raw");
+  const [aiSummary, setAiSummary] = useState<string | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Load cached summary when transcript changes
+  useEffect(() => {
+    if (transcript) {
+      const cached = getCachedSegmentSummary(transcript.id);
+      setAiSummary(cached);
+      setSummaryError(null);
+    } else {
+      setAiSummary(null);
+      setTranscriptMode("raw");
+    }
+  }, [transcript?.id]);
+
+  const handleGenerateSummary = async () => {
+    if (!transcript) return;
+    setSummaryLoading(true);
+    setSummaryError(null);
+    try {
+      const text = transcript.fullTranscript || transcript.summary || "";
+      const result = await generateSegmentSummary(transcript.id, transcript.title, text);
+      setAiSummary(result);
+      setTranscriptMode("summary");
+    } catch (err) {
+      setSummaryError(err instanceof Error ? err.message : "Failed to generate summary");
+    } finally {
+      setSummaryLoading(false);
+    }
+  };
+
   if (!transcript) {
     return (
       <div className="flex items-center justify-center h-full text-muted text-sm p-8 text-center">
@@ -225,19 +259,75 @@ function TranscriptView({
         </div>
       )}
 
-      {/* Summary */}
+      {/* Transcript / Summary toggle */}
       <div className="mb-3">
-        <h3 className="text-[10px] font-semibold uppercase text-muted mb-0.5">Summary</h3>
-        <p className="text-sm leading-relaxed whitespace-pre-wrap">{transcript.summary}</p>
-      </div>
-
-      {/* Full Transcript */}
-      {transcript.fullTranscript && transcript.fullTranscript !== transcript.summary && (
-        <div className="mb-3">
-          <h3 className="text-[10px] font-semibold uppercase text-muted mb-0.5">Full Transcript</h3>
-          <p className="text-sm leading-relaxed whitespace-pre-wrap text-gray-700">{transcript.fullTranscript}</p>
+        <div className="flex items-center gap-2 mb-2">
+          <div className="flex rounded-lg border border-border overflow-hidden">
+            <button
+              onClick={() => setTranscriptMode("raw")}
+              className={`px-2.5 py-1 text-[10px] font-medium transition-colors ${
+                transcriptMode === "raw" ? "bg-accent text-white" : "text-muted hover:bg-gray-50"
+              }`}
+            >
+              Transcript
+            </button>
+            <button
+              onClick={() => {
+                if (aiSummary) {
+                  setTranscriptMode("summary");
+                } else if (hasApiKey()) {
+                  handleGenerateSummary();
+                }
+              }}
+              disabled={summaryLoading}
+              className={`px-2.5 py-1 text-[10px] font-medium transition-colors border-l border-border ${
+                transcriptMode === "summary" ? "bg-purple-600 text-white" : "text-muted hover:bg-gray-50"
+              } disabled:opacity-50`}
+            >
+              {summaryLoading ? "Generating..." : "AI Summary"}
+            </button>
+          </div>
+          {transcriptMode === "summary" && aiSummary && (
+            <button
+              onClick={handleGenerateSummary}
+              disabled={summaryLoading}
+              className="text-[10px] text-muted hover:text-purple-600 disabled:opacity-50"
+              title="Regenerate summary"
+            >
+              ↻ Regenerate
+            </button>
+          )}
+          {!hasApiKey() && transcriptMode === "raw" && (
+            <span className="text-[10px] text-gray-400">Set API key in settings for AI summaries</span>
+          )}
         </div>
-      )}
+
+        {summaryError && (
+          <p className="text-[10px] text-red-500 mb-2">{summaryError}</p>
+        )}
+
+        {transcriptMode === "summary" && aiSummary ? (
+          <div
+            className="text-sm text-gray-700 leading-relaxed prose-sm"
+            dangerouslySetInnerHTML={{ __html: renderMarkdown(aiSummary) }}
+          />
+        ) : (
+          <>
+            {transcript.summary && (
+              <div className="mb-2">
+                <h3 className="text-[10px] font-semibold uppercase text-muted mb-0.5">Summary</h3>
+                <p className="text-sm leading-relaxed whitespace-pre-wrap">{transcript.summary}</p>
+              </div>
+            )}
+            {transcript.fullTranscript && transcript.fullTranscript !== transcript.summary && (
+              <div>
+                <h3 className="text-[10px] font-semibold uppercase text-muted mb-0.5">Full Transcript</h3>
+                <p className="text-sm leading-relaxed whitespace-pre-wrap text-gray-700">{transcript.fullTranscript}</p>
+              </div>
+            )}
+          </>
+        )}
+      </div>
 
       {/* Photos & Attachments */}
       <div className="mb-3">
@@ -347,6 +437,21 @@ function TranscriptView({
       )}
     </div>
   );
+}
+
+/** Lightweight markdown-to-HTML for AI summaries */
+function renderMarkdown(md: string): string {
+  return md
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/^### (.+)$/gm, '<h4 class="font-semibold text-xs mt-2 mb-0.5">$1</h4>')
+    .replace(/^## (.+)$/gm, '<h3 class="font-semibold text-sm mt-2 mb-0.5">$1</h3>')
+    .replace(/^# (.+)$/gm, '<h3 class="font-bold text-sm mt-2 mb-0.5">$1</h3>')
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*(.+?)\*/g, "<em>$1</em>")
+    .replace(/^[-*] (.+)$/gm, '<li class="ml-3 list-disc">$1</li>')
+    .replace(/((?:<li[^>]*>.*<\/li>\n?)+)/g, '<ul class="my-1">$1</ul>')
+    .replace(/\n{2,}/g, '<div class="h-1.5"></div>')
+    .replace(/\n/g, "<br>");
 }
 
 function handleFileAttach(
