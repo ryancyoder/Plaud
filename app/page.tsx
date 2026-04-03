@@ -1,12 +1,14 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { Transcript } from "@/lib/types";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { Transcript, Client } from "@/lib/types";
 import { getWeekDates } from "@/lib/mock-data";
 import { loadTranscripts, saveTranscripts } from "@/lib/store";
+import { loadClients, getTranscriptsForClient } from "@/lib/clients";
 import WeekCalendar from "@/components/WeekCalendar";
 import SummaryBar from "@/components/SummaryBar";
 import ViewerPanel from "@/components/ViewerPanel";
+import ClientRoster from "@/components/ClientRoster";
 import ImportButton from "@/components/ImportButton";
 
 function getWeekLabel(weekDates: string[]): string {
@@ -22,20 +24,39 @@ function getWeekLabel(weekDates: string[]): string {
 export default function Dashboard() {
   const [selectedTranscript, setSelectedTranscript] = useState<Transcript | null>(null);
   const [transcripts, setTranscripts] = useState<Transcript[]>([]);
+  const [clients, setClients] = useState<Client[]>([]);
+  const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [weekOffset, setWeekOffset] = useState(0);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     setTranscripts(loadTranscripts());
+    setClients(loadClients());
     setMounted(true);
   }, []);
 
   const currentWeek = getWeekDates(weekOffset);
-  const currentWeekTranscripts = transcripts.filter((t) => currentWeek.includes(t.date));
 
-  const actionItems = transcripts.flatMap((t) => t.actionItems);
-  const callItems = transcripts.flatMap((t) => t.calls);
-  const errandItems = transcripts.flatMap((t) => t.errands);
+  // Filter transcripts by selected client
+  const visibleTranscripts = useMemo(() => {
+    if (!selectedClient) return transcripts;
+    return getTranscriptsForClient(transcripts, selectedClient);
+  }, [transcripts, selectedClient]);
+
+  const currentWeekTranscripts = visibleTranscripts.filter((t) => currentWeek.includes(t.date));
+
+  const actionItems = visibleTranscripts.flatMap((t) => t.actionItems);
+  const callItems = visibleTranscripts.flatMap((t) => t.calls);
+  const errandItems = visibleTranscripts.flatMap((t) => t.errands);
+
+  // Count transcripts per client for badges
+  const transcriptCountByClient = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const client of clients) {
+      counts[client.id] = getTranscriptsForClient(transcripts, client).length;
+    }
+    return counts;
+  }, [transcripts, clients]);
 
   const handleImport = useCallback((newTranscripts: Transcript[]) => {
     setTranscripts((prev) => [...prev, ...newTranscripts]);
@@ -49,9 +70,13 @@ export default function Dashboard() {
     }
   }, []);
 
+  const handleClientsChange = useCallback(() => {
+    setClients(loadClients());
+  }, []);
+
   const getTranscriptsForDate = useCallback(
-    (date: string) => transcripts.filter((t) => t.date === date),
-    [transcripts]
+    (date: string) => visibleTranscripts.filter((t) => t.date === date),
+    [visibleTranscripts]
   );
 
   if (!mounted) return null;
@@ -61,30 +86,28 @@ export default function Dashboard() {
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-background">
       {/* Header */}
-      <header className="shrink-0 px-5 py-2.5 flex items-center justify-between border-b border-border bg-surface">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-accent flex items-center justify-center">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <header className="shrink-0 px-4 py-2 flex items-center justify-between border-b border-border bg-surface">
+        <div className="flex items-center gap-2.5">
+          <div className="w-7 h-7 rounded-lg bg-accent flex items-center justify-center">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
               <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
               <line x1="12" x2="12" y1="19" y2="22" />
             </svg>
           </div>
-          <h1 className="text-lg font-bold tracking-tight">Plaud Dashboard</h1>
+          <h1 className="text-base font-bold tracking-tight">Plaud</h1>
         </div>
 
-        {/* Week navigation - centered */}
-        <div className="flex items-center gap-2">
+        {/* Week navigation */}
+        <div className="flex items-center gap-1.5">
           <button
             onClick={() => setWeekOffset((w) => w - 1)}
-            className="p-2 rounded-lg text-muted hover:bg-gray-100 active:scale-95 transition-all"
+            className="p-1.5 rounded-lg text-muted hover:bg-gray-100 active:scale-95"
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="15 18 9 12 15 6" />
-            </svg>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="15 18 9 12 15 6" /></svg>
           </button>
-          <div className="flex items-center gap-2">
-            <h2 className="text-sm font-bold min-w-[180px] text-center">{getWeekLabel(currentWeek)}</h2>
+          <div className="flex items-center gap-1.5">
+            <span className="text-sm font-semibold min-w-[160px] text-center">{getWeekLabel(currentWeek)}</span>
             {!isCurrentWeek && (
               <button
                 onClick={() => setWeekOffset(0)}
@@ -96,11 +119,9 @@ export default function Dashboard() {
           </div>
           <button
             onClick={() => setWeekOffset((w) => w + 1)}
-            className="p-2 rounded-lg text-muted hover:bg-gray-100 active:scale-95 transition-all"
+            className="p-1.5 rounded-lg text-muted hover:bg-gray-100 active:scale-95"
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="9 18 15 12 9 6" />
-            </svg>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="9 18 15 12 9 6" /></svg>
           </button>
         </div>
 
@@ -109,7 +130,7 @@ export default function Dashboard() {
           {transcripts.length > 0 && (
             <button
               onClick={handleClearData}
-              className="px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-red-600 border border-red-200 hover:bg-red-50 active:scale-95 transition-all"
+              className="px-2 py-1.5 rounded-lg text-[10px] font-medium text-red-600 border border-red-200 hover:bg-red-50 active:scale-95"
             >
               Clear
             </button>
@@ -117,14 +138,25 @@ export default function Dashboard() {
         </div>
       </header>
 
-      {/* Main content: 2/3 calendar, 1/3 viewer */}
+      {/* Three-panel layout */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Left 2/3: Calendar */}
-        <div className="flex-[2] flex flex-col overflow-y-auto border-r border-border">
-          {/* Week summary */}
+        {/* Left: Client Roster */}
+        <div className="w-56 shrink-0 border-r border-border overflow-hidden">
+          <ClientRoster
+            clients={clients}
+            selectedClientId={selectedClient?.id || null}
+            onSelectClient={setSelectedClient}
+            onClientsChange={handleClientsChange}
+            transcriptCountByClient={transcriptCountByClient}
+          />
+        </div>
+
+        {/* Center: Calendar */}
+        <div className="flex-[2] flex flex-col overflow-hidden border-r border-border">
+          {/* Summary bar */}
           <div className="shrink-0 p-3 pb-0">
             <SummaryBar
-              label={getWeekLabel(currentWeek)}
+              label={selectedClient ? `${selectedClient.name} — ${getWeekLabel(currentWeek)}` : getWeekLabel(currentWeek)}
               transcripts={currentWeekTranscripts}
               variant={isCurrentWeek ? "this-week" : "next-week"}
             />
@@ -141,7 +173,7 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Right 1/3: Viewer panel */}
+        {/* Right: Viewer Panel */}
         <div className="flex-1 flex flex-col overflow-hidden">
           <ViewerPanel
             selectedTranscript={selectedTranscript}

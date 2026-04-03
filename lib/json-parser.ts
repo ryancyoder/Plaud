@@ -31,6 +31,9 @@ interface RawRecording {
   length?: number | string;
 
   transcript?: string;
+  fullTranscript?: string;
+  full_transcript?: string;
+  fulltranscript?: string;
   text?: string;
   content?: string;
   body?: string;
@@ -39,6 +42,16 @@ interface RawRecording {
   participants?: string[];
   speakers?: string[];
   attendees?: string[];
+
+  clientName?: string;
+  client_name?: string;
+  clientname?: string;
+  client?: string;
+
+  todos?: string[];
+  to_dos?: string[];
+  action_items?: string[];
+  actionItems?: string[];
 
   transcript_type?: string;
   transcriptType?: string;
@@ -172,8 +185,29 @@ function extractTitle(raw: RawRecording): string {
   );
 }
 
+function extractFullTranscript(raw: RawRecording): string {
+  return raw.fullTranscript || raw.full_transcript || raw.fulltranscript ||
+    raw.transcript || raw.text || raw.content || raw.body || "";
+}
+
 function extractText(raw: RawRecording): string {
-  return raw.transcript || raw.text || raw.content || raw.body || raw.summary || "";
+  return extractFullTranscript(raw) || raw.summary || "";
+}
+
+function extractClientName(raw: RawRecording): string | undefined {
+  return raw.clientName || raw.client_name || raw.clientname || raw.client || undefined;
+}
+
+function extractTodos(raw: RawRecording): { id: string; text: string; done: boolean; source: string }[] {
+  const todos = raw.todos || raw.to_dos || raw.action_items || raw.actionItems;
+  if (!todos || !Array.isArray(todos)) return [];
+  const source = extractTitle(raw);
+  return todos.map((text, i) => ({
+    id: `${generateId()}-todo-${i}`,
+    text: typeof text === "string" ? text : String(text),
+    done: false,
+    source,
+  }));
 }
 
 function extractParticipants(raw: RawRecording): string[] {
@@ -266,9 +300,11 @@ function rawToTranscript(raw: RawRecording): Transcript {
     startTime: extractTime(raw),
     duration: extractDuration(raw),
     summary: extractSummary(raw),
+    fullTranscript: extractFullTranscript(raw) || undefined,
     participants: extractParticipants(raw),
+    clientName: extractClientName(raw),
     tags: extractTags(raw, title, text),
-    actionItems: [],
+    actionItems: extractTodos(raw),
     calls: [],
     errands: [],
   };

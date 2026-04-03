@@ -5,14 +5,26 @@ export interface Transcript {
   startTime: string; // HH:MM
   duration: number; // minutes
   summary: string;
+  fullTranscript?: string;
   participants: string[];
+  clientName?: string;
   tags: Tag[];
   actionItems: ActionItem[];
   calls: CallItem[];
   errands: ErrandItem[];
+  pinned?: boolean;
 }
 
 export type Tag = "meeting" | "call" | "personal" | "medical" | "errand" | "brainstorm" | "interview" | "discussion" | "advertisement";
+
+export interface Client {
+  id: string;
+  name: string;
+  company?: string;
+  type: "client" | "contact"; // external client vs in-house
+  transcriptCount: number;
+  lastSeen?: string; // ISO date
+}
 
 export interface ActionItem {
   id: string;

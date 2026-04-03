@@ -128,11 +128,27 @@ function TranscriptView({ transcript, onClose }: { transcript: Transcript | null
         </div>
       )}
 
-      {/* Summary / Full transcript */}
+      {/* Summary */}
       <div className="mb-3">
-        <h3 className="text-[10px] font-semibold uppercase text-muted mb-0.5">Transcript</h3>
+        <h3 className="text-[10px] font-semibold uppercase text-muted mb-0.5">Summary</h3>
         <p className="text-sm leading-relaxed whitespace-pre-wrap">{transcript.summary}</p>
       </div>
+
+      {/* Full Transcript */}
+      {transcript.fullTranscript && transcript.fullTranscript !== transcript.summary && (
+        <div className="mb-3">
+          <h3 className="text-[10px] font-semibold uppercase text-muted mb-0.5">Full Transcript</h3>
+          <p className="text-sm leading-relaxed whitespace-pre-wrap text-gray-700">{transcript.fullTranscript}</p>
+        </div>
+      )}
+
+      {/* Client */}
+      {transcript.clientName && (
+        <div className="mb-3">
+          <h3 className="text-[10px] font-semibold uppercase text-muted mb-0.5">Client</h3>
+          <p className="text-sm">{transcript.clientName}</p>
+        </div>
+      )}
 
       {/* Action Items from this transcript */}
       {transcript.actionItems.length > 0 && (
