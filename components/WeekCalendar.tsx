@@ -18,6 +18,27 @@ interface WeekCalendarProps {
 const WEEKDAY_DATES = (dates: string[]) => dates.slice(0, 5); // Mon-Fri
 const WEEKEND_DATES = (dates: string[]) => dates.slice(5, 7); // Sat-Sun
 
+/** Lightweight markdown-to-HTML for AI summaries */
+function renderMarkdown(md: string): string {
+  return md
+    // Escape HTML
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    // Headers
+    .replace(/^### (.+)$/gm, '<h4 class="font-semibold text-xs mt-2 mb-0.5">$1</h4>')
+    .replace(/^## (.+)$/gm, '<h3 class="font-semibold text-sm mt-2 mb-0.5">$1</h3>')
+    .replace(/^# (.+)$/gm, '<h3 class="font-bold text-sm mt-2 mb-0.5">$1</h3>')
+    // Bold and italic
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*(.+?)\*/g, "<em>$1</em>")
+    // Unordered list items
+    .replace(/^[-*] (.+)$/gm, '<li class="ml-3 list-disc">$1</li>')
+    // Wrap consecutive <li> in <ul>
+    .replace(/((?:<li[^>]*>.*<\/li>\n?)+)/g, '<ul class="my-1">$1</ul>')
+    // Line breaks for remaining lines
+    .replace(/\n{2,}/g, '<div class="h-1.5"></div>')
+    .replace(/\n/g, "<br>");
+}
+
 export default function WeekCalendar({ weekDates, onSelectTranscript, onDeleteTranscript, getTranscriptsForDate, selectedTranscriptId, viewMode = "granular" }: WeekCalendarProps) {
   const weekdays = WEEKDAY_DATES(weekDates);
   const weekend = WEEKEND_DATES(weekDates);
@@ -203,7 +224,10 @@ function DaySummaryCard({ date, transcripts, onSelect, isSelected }: DaySummaryC
               ↻
             </button>
           </div>
-          <p className="text-xs text-gray-700 leading-relaxed whitespace-pre-wrap">{aiSummary}</p>
+          <div
+            className="text-xs text-gray-700 leading-relaxed prose-sm"
+            dangerouslySetInnerHTML={{ __html: renderMarkdown(aiSummary) }}
+          />
         </div>
       ) : (
         <div className="mb-2">
