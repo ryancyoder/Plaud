@@ -1,1 +1,3 @@
-node_modules/\n.next/\nout/
+node_modules/
+.next/
+out/
