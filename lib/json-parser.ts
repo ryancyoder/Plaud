@@ -65,9 +65,18 @@ function extractDate(raw: RawRecording): string {
     raw.createdAt;
 
   if (dateStr) {
-    // Handle ISO strings, "YYYY-MM-DD", "MM/DD/YYYY", etc.
+    // If already YYYY-MM-DD, use directly (avoids timezone shifts)
+    const isoMatch = dateStr.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (isoMatch) return isoMatch[1];
+
+    // Otherwise parse and extract date in local timezone
     const d = new Date(dateStr);
-    if (!isNaN(d.getTime())) return d.toISOString().split("T")[0];
+    if (!isNaN(d.getTime())) {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, "0");
+      const day = String(d.getDate()).padStart(2, "0");
+      return `${y}-${m}-${day}`;
+    }
   }
 
   if (raw.timestamp) {
@@ -75,10 +84,19 @@ function extractDate(raw: RawRecording): string {
     // Handle seconds vs milliseconds
     const ms = ts < 1e12 ? ts * 1000 : ts;
     const d = new Date(ms);
-    if (!isNaN(d.getTime())) return d.toISOString().split("T")[0];
+    if (!isNaN(d.getTime())) {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, "0");
+      const day = String(d.getDate()).padStart(2, "0");
+      return `${y}-${m}-${day}`;
+    }
   }
 
-  return new Date().toISOString().split("T")[0];
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 function extractTime(raw: RawRecording): string {
