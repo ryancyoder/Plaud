@@ -1,204 +1,168 @@
 "use client";
 
-import { useState } from "react";
 import { Transcript } from "@/lib/types";
-import { getDayName, getDayNumber, isToday, isPast, formatDuration, getBlockColor, getTagColor } from "@/lib/utils";
-import TranscriptBlock from "./TranscriptBlock";
+import { getDayName, getDayNumber, isToday, isPast, formatDuration, getBlockColor, getTagColor, formatDate } from "@/lib/utils";
 
 interface WeekCalendarProps {
-  weekDates: string[];
+  weekDates: string[]; // Mon-Sun, 7 dates
   onSelectTranscript: (transcript: Transcript) => void;
   getTranscriptsForDate: (date: string) => Transcript[];
+  selectedTranscriptId?: string;
 }
 
-const SHORT_THRESHOLD = 30; // minutes
+const WEEKDAY_DATES = (dates: string[]) => dates.slice(0, 5); // Mon-Fri
+const WEEKEND_DATES = (dates: string[]) => dates.slice(5, 7); // Sat-Sun
 
-// Time axis config
-const START_HOUR = 6;
-const END_HOUR = 22;
-const TOTAL_HOURS = END_HOUR - START_HOUR;
-const PX_PER_HOUR = 80;
-const TOTAL_HEIGHT = TOTAL_HOURS * PX_PER_HOUR;
-
-function timeToOffset(timeStr: string): number {
-  const [h, m] = timeStr.split(":").map(Number);
-  const hours = h + m / 60 - START_HOUR;
-  return Math.max(0, Math.min(hours * PX_PER_HOUR, TOTAL_HEIGHT));
-}
-
-function durationToHeight(minutes: number): number {
-  return Math.max(50, (minutes / 60) * PX_PER_HOUR);
-}
-
-function formatHour(hour: number): string {
-  if (hour === 0 || hour === 24) return "12 AM";
-  if (hour === 12) return "12 PM";
-  return hour < 12 ? `${hour} AM` : `${hour - 12} PM`;
-}
-
-export default function WeekCalendar({ weekDates, onSelectTranscript, getTranscriptsForDate }: WeekCalendarProps) {
-  const [expandedDays, setExpandedDays] = useState<Set<string>>(new Set());
-  const hours = Array.from({ length: TOTAL_HOURS }, (_, i) => START_HOUR + i);
-
-  function toggleShortList(date: string) {
-    setExpandedDays((prev) => {
-      const next = new Set(prev);
-      if (next.has(date)) next.delete(date);
-      else next.add(date);
-      return next;
-    });
-  }
+export default function WeekCalendar({ weekDates, onSelectTranscript, getTranscriptsForDate, selectedTranscriptId }: WeekCalendarProps) {
+  const weekdays = WEEKDAY_DATES(weekDates);
+  const weekend = WEEKEND_DATES(weekDates);
 
   return (
-    <div className="bg-surface rounded-xl shadow-sm border border-border overflow-hidden">
-      {/* Day headers */}
-      <div className="grid grid-cols-[60px_repeat(7,1fr)] border-b border-border">
-        <div className="px-2 py-2 text-center" />
-        {weekDates.map((date) => {
-          const today = isToday(date);
-          const past = isPast(date);
-          const allTranscripts = getTranscriptsForDate(date);
-          const shortCount = allTranscripts.filter((t) => t.duration < SHORT_THRESHOLD).length;
+    <div className="flex flex-col gap-3">
+      {/* Weekdays */}
+      {weekdays.map((date) => (
+        <DayRow
+          key={date}
+          date={date}
+          transcripts={getTranscriptsForDate(date)}
+          onSelect={onSelectTranscript}
+          selectedId={selectedTranscriptId}
+        />
+      ))}
 
-          return (
-            <div
-              key={date}
-              className={`px-2 py-2 text-center border-l border-border ${today ? "bg-accent text-white" : past ? "bg-gray-50" : ""}`}
-            >
-              <div className={`text-xs font-medium uppercase ${today ? "text-white/80" : "text-muted"}`}>
-                {getDayName(date)}
-              </div>
-              <div className={`text-lg font-bold ${today ? "text-white" : ""}`}>
-                {getDayNumber(date)}
-              </div>
-              {shortCount > 0 && (
-                <button
-                  onClick={() => toggleShortList(date)}
-                  className={`mt-1 text-[10px] px-2 py-0.5 rounded-full transition-colors ${
-                    expandedDays.has(date)
-                      ? today
-                        ? "bg-white/30 text-white"
-                        : "bg-accent-light text-accent"
-                      : today
-                        ? "bg-white/20 text-white/80 hover:bg-white/30"
-                        : "bg-gray-100 text-muted hover:bg-gray-200"
-                  }`}
-                >
-                  {shortCount} short
-                </button>
-              )}
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Short transcripts list (expandable per day) */}
-      {weekDates.some((d) => expandedDays.has(d)) && (
-        <div className="grid grid-cols-[60px_repeat(7,1fr)] border-b border-border bg-gray-50/50">
-          <div className="px-2 py-2 flex items-start justify-end">
-            <span className="text-[10px] text-muted uppercase font-semibold">Quick</span>
+      {/* Weekend section */}
+      {weekend.some((d) => getTranscriptsForDate(d).length > 0) && (
+        <>
+          <div className="text-xs font-semibold uppercase text-muted tracking-wider px-1 pt-2">
+            Weekend
           </div>
-          {weekDates.map((date) => {
-            const allTranscripts = getTranscriptsForDate(date);
-            const shortTranscripts = allTranscripts
-              .filter((t) => t.duration < SHORT_THRESHOLD)
-              .sort((a, b) => a.startTime.localeCompare(b.startTime));
-            const isExpanded = expandedDays.has(date);
-
+          {weekend.map((date) => {
+            const transcripts = getTranscriptsForDate(date);
+            if (transcripts.length === 0) return null;
             return (
-              <div key={date} className="border-l border-border px-1 py-1.5">
-                {isExpanded && shortTranscripts.length > 0 ? (
-                  <div className="space-y-1">
-                    {shortTranscripts.map((t) => {
-                      const primaryTag = t.tags[0];
-                      const tagColor = primaryTag ? getTagColor(primaryTag) : { bg: "bg-gray-100", text: "text-gray-700" };
-                      return (
-                        <button
-                          key={t.id}
-                          onClick={() => onSelectTranscript(t)}
-                          className="w-full text-left px-2 py-1.5 rounded-md hover:bg-white active:bg-gray-100 transition-colors"
-                        >
-                          <div className="flex items-center gap-1.5">
-                            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${tagColor.bg.replace("100", "500")}`} />
-                            <span className="text-[11px] font-medium truncate">{t.title}</span>
-                          </div>
-                          <div className="flex items-center gap-1 ml-3 mt-0.5">
-                            <span className="text-[10px] text-muted">{t.startTime}</span>
-                            <span className="text-[10px] text-muted">· {formatDuration(t.duration)}</span>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="h-4" />
-                )}
-              </div>
+              <DayRow
+                key={date}
+                date={date}
+                transcripts={transcripts}
+                onSelect={onSelectTranscript}
+                selectedId={selectedTranscriptId}
+              />
             );
           })}
+        </>
+      )}
+    </div>
+  );
+}
+
+interface DayRowProps {
+  date: string;
+  transcripts: Transcript[];
+  onSelect: (transcript: Transcript) => void;
+  selectedId?: string;
+}
+
+function DayRow({ date, transcripts, onSelect, selectedId }: DayRowProps) {
+  const today = isToday(date);
+  const past = isPast(date);
+  const sorted = [...transcripts].sort((a, b) => a.startTime.localeCompare(b.startTime));
+
+  return (
+    <div className={`rounded-xl border overflow-hidden ${today ? "border-accent bg-blue-50/30" : "border-border bg-surface"}`}>
+      {/* Day header */}
+      <div className={`flex items-center gap-3 px-4 py-2 border-b ${today ? "bg-accent text-white border-accent" : past ? "bg-gray-50 border-border" : "border-border"}`}>
+        <div className={`text-2xl font-bold leading-none ${today ? "text-white" : ""}`}>
+          {getDayNumber(date)}
+        </div>
+        <div>
+          <div className={`text-sm font-medium ${today ? "text-white" : ""}`}>
+            {getDayName(date)}
+          </div>
+          <div className={`text-[11px] ${today ? "text-white/70" : "text-muted"}`}>
+            {formatDate(date)}
+          </div>
+        </div>
+        <div className={`ml-auto text-xs ${today ? "text-white/70" : "text-muted"}`}>
+          {sorted.length} recording{sorted.length !== 1 ? "s" : ""}
+          {sorted.length > 0 && ` · ${formatDuration(sorted.reduce((s, t) => s + t.duration, 0))}`}
+        </div>
+      </div>
+
+      {/* Transcript entries */}
+      {sorted.length === 0 ? (
+        <div className="px-4 py-3 text-sm text-gray-300">No recordings</div>
+      ) : (
+        <div className="divide-y divide-gray-100">
+          {sorted.map((t) => (
+            <TranscriptRow
+              key={t.id}
+              transcript={t}
+              onSelect={onSelect}
+              isSelected={selectedId === t.id}
+            />
+          ))}
         </div>
       )}
+    </div>
+  );
+}
 
-      {/* Scrollable time grid */}
-      <div className="overflow-y-auto" style={{ maxHeight: "calc(100vh - 320px)" }}>
-        <div className="grid grid-cols-[60px_repeat(7,1fr)] relative" style={{ height: TOTAL_HEIGHT }}>
-          {/* Time axis */}
-          <div className="relative">
-            {hours.map((hour) => (
-              <div
-                key={hour}
-                className="absolute right-2 text-[11px] text-muted -translate-y-1/2"
-                style={{ top: (hour - START_HOUR) * PX_PER_HOUR }}
-              >
-                {formatHour(hour)}
-              </div>
-            ))}
-          </div>
+interface TranscriptRowProps {
+  transcript: Transcript;
+  onSelect: (transcript: Transcript) => void;
+  isSelected: boolean;
+}
 
-          {/* Day columns */}
-          {weekDates.map((date) => {
-            const allTranscripts = getTranscriptsForDate(date);
-            const longTranscripts = allTranscripts.filter((t) => t.duration >= SHORT_THRESHOLD);
-            const today = isToday(date);
+function TranscriptRow({ transcript, onSelect, isSelected }: TranscriptRowProps) {
+  const primaryTag = transcript.tags[0];
+  const blockColor = primaryTag ? getBlockColor(primaryTag) : "border-l-gray-400 bg-gray-50";
+  const tagColor = primaryTag ? getTagColor(primaryTag) : { bg: "bg-gray-100", text: "text-gray-700" };
 
+  return (
+    <button
+      onClick={() => onSelect(transcript)}
+      className={`w-full text-left flex items-start gap-3 px-4 py-2.5 transition-colors ${
+        isSelected
+          ? "bg-accent-light"
+          : "hover:bg-gray-50 active:bg-gray-100"
+      }`}
+    >
+      {/* Time column */}
+      <div className="shrink-0 w-14 pt-0.5">
+        <div className="text-sm font-semibold tabular-nums">{transcript.startTime}</div>
+        <div className="text-[10px] text-muted">{formatDuration(transcript.duration)}</div>
+      </div>
+
+      {/* Color bar */}
+      <div className={`shrink-0 w-1 self-stretch rounded-full ${tagColor.bg.replace("100", "500")}`} />
+
+      {/* Content */}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <h4 className="text-sm font-semibold truncate">{transcript.title}</h4>
+          {transcript.tags.map((tag) => {
+            const c = getTagColor(tag);
             return (
-              <div
-                key={date}
-                className={`relative border-l border-border ${today ? "bg-blue-50/30" : ""}`}
-              >
-                {/* Hour grid lines */}
-                {hours.map((hour) => (
-                  <div
-                    key={hour}
-                    className="absolute left-0 right-0 border-t border-gray-100"
-                    style={{ top: (hour - START_HOUR) * PX_PER_HOUR }}
-                  />
-                ))}
-
-                {/* Only plot transcripts >= 30 min on the time grid */}
-                {longTranscripts.map((t) => {
-                  const top = timeToOffset(t.startTime);
-                  const height = durationToHeight(t.duration);
-
-                  return (
-                    <div
-                      key={t.id}
-                      className="absolute left-1 right-1 z-10"
-                      style={{ top, height }}
-                    >
-                      <TranscriptBlock
-                        transcript={t}
-                        onSelect={onSelectTranscript}
-                        compact={height < 70}
-                      />
-                    </div>
-                  );
-                })}
-              </div>
+              <span key={tag} className={`text-[10px] px-1.5 py-0.5 rounded-full shrink-0 ${c.bg} ${c.text}`}>
+                {tag}
+              </span>
             );
           })}
         </div>
+        <p className="text-xs text-muted mt-0.5 line-clamp-2">{transcript.summary}</p>
+        {transcript.participants.length > 0 && (
+          <p className="text-[11px] text-muted mt-1">
+            {transcript.participants.join(", ")}
+          </p>
+        )}
       </div>
-    </div>
+
+      {/* Arrow */}
+      <div className="shrink-0 self-center text-gray-300">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <polyline points="9 18 15 12 9 6" />
+        </svg>
+      </div>
+    </button>
   );
 }

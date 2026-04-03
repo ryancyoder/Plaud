@@ -6,8 +6,7 @@ import { getWeekDates } from "@/lib/mock-data";
 import { loadTranscripts, saveTranscripts } from "@/lib/store";
 import WeekCalendar from "@/components/WeekCalendar";
 import SummaryBar from "@/components/SummaryBar";
-import SidebarLists from "@/components/SidebarLists";
-import TranscriptDetail from "@/components/TranscriptDetail";
+import ViewerPanel from "@/components/ViewerPanel";
 import ImportButton from "@/components/ImportButton";
 
 function getWeekLabel(weekDates: string[]): string {
@@ -46,6 +45,7 @@ export default function Dashboard() {
     if (window.confirm("Clear all imported transcripts? This cannot be undone.")) {
       saveTranscripts([]);
       setTranscripts([]);
+      setSelectedTranscript(null);
     }
   }, []);
 
@@ -61,7 +61,7 @@ export default function Dashboard() {
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-background">
       {/* Header */}
-      <header className="shrink-0 px-5 py-3 flex items-center justify-between border-b border-border bg-surface">
+      <header className="shrink-0 px-5 py-2.5 flex items-center justify-between border-b border-border bg-surface">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-lg bg-accent flex items-center justify-center">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -72,103 +72,86 @@ export default function Dashboard() {
           </div>
           <h1 className="text-lg font-bold tracking-tight">Plaud Dashboard</h1>
         </div>
-        <div className="flex items-center gap-4">
+
+        {/* Week navigation - centered */}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setWeekOffset((w) => w - 1)}
+            className="p-2 rounded-lg text-muted hover:bg-gray-100 active:scale-95 transition-all"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="15 18 9 12 15 6" />
+            </svg>
+          </button>
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm font-bold min-w-[180px] text-center">{getWeekLabel(currentWeek)}</h2>
+            {!isCurrentWeek && (
+              <button
+                onClick={() => setWeekOffset(0)}
+                className="text-[10px] px-2 py-0.5 rounded-full bg-accent text-white hover:bg-blue-600 active:scale-95"
+              >
+                Today
+              </button>
+            )}
+          </div>
+          <button
+            onClick={() => setWeekOffset((w) => w + 1)}
+            className="p-2 rounded-lg text-muted hover:bg-gray-100 active:scale-95 transition-all"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="9 18 15 12 9 6" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="flex items-center gap-2">
           <ImportButton onImport={handleImport} />
           {transcripts.length > 0 && (
             <button
               onClick={handleClearData}
-              className="px-3 py-2 rounded-lg text-xs font-medium text-red-600 border border-red-200 hover:bg-red-50 active:scale-95 transition-all"
+              className="px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-red-600 border border-red-200 hover:bg-red-50 active:scale-95 transition-all"
             >
-              Clear Data
+              Clear
             </button>
           )}
         </div>
       </header>
 
-      {/* Debug bar - shows transcript count and date range */}
-      {transcripts.length > 0 && (
-        <div className="shrink-0 px-5 py-1.5 bg-gray-50 border-b border-border text-xs text-muted flex items-center gap-4">
-          <span>{transcripts.length} transcripts loaded</span>
-          <span>
-            Dates: {transcripts.map((t) => t.date).sort()[0]} to{" "}
-            {transcripts.map((t) => t.date).sort().reverse()[0]}
-          </span>
-          <span>Viewing: {currentWeek[0]} to {currentWeek[6]}</span>
-          <span>Matches this view: {currentWeekTranscripts.length}</span>
-        </div>
-      )}
-
-      {/* Main content */}
+      {/* Main content: 2/3 calendar, 1/3 viewer */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Left: Calendar area */}
-        <div className="flex-1 flex flex-col overflow-y-auto p-4 gap-3">
-          {/* Week navigation */}
-          <div className="flex items-center justify-between">
-            <button
-              onClick={() => setWeekOffset((w) => w - 1)}
-              className="flex items-center gap-1 px-3 py-2 rounded-lg text-sm font-medium text-muted hover:bg-gray-100 active:scale-95 transition-all"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="15 18 9 12 15 6" />
-              </svg>
-              Prev
-            </button>
-
-            <div className="flex items-center gap-3">
-              <h2 className="text-base font-bold">{getWeekLabel(currentWeek)}</h2>
-              {!isCurrentWeek && (
-                <button
-                  onClick={() => setWeekOffset(0)}
-                  className="text-xs px-2.5 py-1 rounded-full bg-accent text-white hover:bg-blue-600 active:scale-95 transition-all"
-                >
-                  Today
-                </button>
-              )}
-            </div>
-
-            <button
-              onClick={() => setWeekOffset((w) => w + 1)}
-              className="flex items-center gap-1 px-3 py-2 rounded-lg text-sm font-medium text-muted hover:bg-gray-100 active:scale-95 transition-all"
-            >
-              Next
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="9 18 15 12 9 6" />
-              </svg>
-            </button>
+        {/* Left 2/3: Calendar */}
+        <div className="flex-[2] flex flex-col overflow-y-auto border-r border-border">
+          {/* Week summary */}
+          <div className="shrink-0 p-3 pb-0">
+            <SummaryBar
+              label={getWeekLabel(currentWeek)}
+              transcripts={currentWeekTranscripts}
+              variant={isCurrentWeek ? "this-week" : "next-week"}
+            />
           </div>
 
-          {/* Week Summary */}
-          <SummaryBar
-            label={getWeekLabel(currentWeek)}
-            transcripts={currentWeekTranscripts}
-            variant={isCurrentWeek ? "this-week" : "next-week"}
-          />
-
-          {/* Calendar */}
-          <WeekCalendar
-            weekDates={currentWeek}
-            onSelectTranscript={setSelectedTranscript}
-            getTranscriptsForDate={getTranscriptsForDate}
-          />
+          {/* Calendar rows */}
+          <div className="flex-1 p-3 overflow-y-auto">
+            <WeekCalendar
+              weekDates={currentWeek}
+              onSelectTranscript={setSelectedTranscript}
+              getTranscriptsForDate={getTranscriptsForDate}
+              selectedTranscriptId={selectedTranscript?.id}
+            />
+          </div>
         </div>
 
-        {/* Right: Sidebar lists */}
-        <div className="w-80 shrink-0 border-l border-border p-4 overflow-hidden flex flex-col">
-          <SidebarLists
+        {/* Right 1/3: Viewer panel */}
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <ViewerPanel
+            selectedTranscript={selectedTranscript}
             actionItems={actionItems}
             callItems={callItems}
             errandItems={errandItems}
+            onClose={() => setSelectedTranscript(null)}
           />
         </div>
       </div>
-
-      {/* Transcript detail modal */}
-      {selectedTranscript && (
-        <TranscriptDetail
-          transcript={selectedTranscript}
-          onClose={() => setSelectedTranscript(null)}
-        />
-      )}
     </div>
   );
 }
