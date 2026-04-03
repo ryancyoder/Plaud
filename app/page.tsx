@@ -180,7 +180,22 @@ export default function Dashboard() {
             actionItems={actionItems}
             callItems={callItems}
             errandItems={errandItems}
+            clients={clients}
             onClose={() => setSelectedTranscript(null)}
+            onAssignClient={(transcriptId, clientName) => {
+              setTranscripts((prev) => {
+                const updated = prev.map((t) =>
+                  t.id === transcriptId ? { ...t, clientName } : t
+                );
+                saveTranscripts(updated);
+                return updated;
+              });
+              if (selectedTranscript?.id === transcriptId) {
+                setSelectedTranscript((prev) =>
+                  prev ? { ...prev, clientName } : null
+                );
+              }
+            }}
           />
         </div>
       </div>

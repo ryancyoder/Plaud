@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Transcript, ActionItem, CallItem, ErrandItem } from "@/lib/types";
+import { Transcript, ActionItem, CallItem, ErrandItem, Client } from "@/lib/types";
 import { formatDuration, getTagColor, formatDate } from "@/lib/utils";
 
 type Tab = "transcript" | "todos" | "calls" | "errands";
@@ -11,7 +11,9 @@ interface ViewerPanelProps {
   actionItems: ActionItem[];
   callItems: CallItem[];
   errandItems: ErrandItem[];
+  clients: Client[];
   onClose: () => void;
+  onAssignClient: (transcriptId: string, clientName: string | undefined) => void;
 }
 
 export default function ViewerPanel({
@@ -19,7 +21,9 @@ export default function ViewerPanel({
   actionItems,
   callItems,
   errandItems,
+  clients,
   onClose,
+  onAssignClient,
 }: ViewerPanelProps) {
   const [activeTab, setActiveTab] = useState<Tab>(selectedTranscript ? "transcript" : "todos");
 
@@ -65,7 +69,12 @@ export default function ViewerPanel({
       {/* Content */}
       <div className="flex-1 overflow-y-auto">
         {effectiveTab === "transcript" && (
-          <TranscriptView transcript={selectedTranscript} onClose={onClose} />
+          <TranscriptView
+            transcript={selectedTranscript}
+            clients={clients}
+            onClose={onClose}
+            onAssignClient={onAssignClient}
+          />
         )}
         {effectiveTab === "todos" && <TodoList items={actionItems} />}
         {effectiveTab === "calls" && <CallList items={callItems} />}
@@ -75,7 +84,18 @@ export default function ViewerPanel({
   );
 }
 
-function TranscriptView({ transcript, onClose }: { transcript: Transcript | null; onClose: () => void }) {
+function TranscriptView({
+  transcript,
+  clients,
+  onClose,
+  onAssignClient,
+}: {
+  transcript: Transcript | null;
+  clients: Client[];
+  onClose: () => void;
+  onAssignClient: (transcriptId: string, clientName: string | undefined) => void;
+}) {
+  const [showAssign, setShowAssign] = useState(false);
   if (!transcript) {
     return (
       <div className="flex items-center justify-center h-full text-muted text-sm p-8 text-center">
@@ -142,13 +162,64 @@ function TranscriptView({ transcript, onClose }: { transcript: Transcript | null
         </div>
       )}
 
-      {/* Client */}
-      {transcript.clientName && (
-        <div className="mb-3">
-          <h3 className="text-[10px] font-semibold uppercase text-muted mb-0.5">Client</h3>
-          <p className="text-sm">{transcript.clientName}</p>
+      {/* Client assignment */}
+      <div className="mb-3">
+        <h3 className="text-[10px] font-semibold uppercase text-muted mb-1">Client</h3>
+        <div className="flex items-center gap-2">
+          {transcript.clientName ? (
+            <span className="text-sm font-medium bg-blue-50 text-blue-700 px-2 py-0.5 rounded">
+              {transcript.clientName}
+            </span>
+          ) : (
+            <span className="text-xs text-gray-400">Unassigned</span>
+          )}
+          <button
+            onClick={() => setShowAssign(!showAssign)}
+            className="text-[10px] px-2 py-0.5 rounded border border-border text-muted hover:bg-gray-50 active:scale-95"
+          >
+            {transcript.clientName ? "Change" : "Assign"}
+          </button>
+          {transcript.clientName && (
+            <button
+              onClick={() => {
+                onAssignClient(transcript.id, undefined);
+                setShowAssign(false);
+              }}
+              className="text-[10px] px-2 py-0.5 rounded border border-red-200 text-red-500 hover:bg-red-50 active:scale-95"
+            >
+              Remove
+            </button>
+          )}
         </div>
-      )}
+        {showAssign && (
+          <div className="mt-1.5 border border-border rounded-lg overflow-hidden bg-white max-h-40 overflow-y-auto">
+            {clients.length === 0 ? (
+              <div className="px-3 py-2 text-xs text-gray-400">No clients — add one in the roster</div>
+            ) : (
+              clients
+                .sort((a, b) => a.name.localeCompare(b.name))
+                .map((c) => (
+                  <button
+                    key={c.id}
+                    onClick={() => {
+                      onAssignClient(transcript.id, c.name);
+                      setShowAssign(false);
+                    }}
+                    className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-50 active:bg-gray-100 flex items-center gap-2"
+                  >
+                    <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold ${
+                      c.type === "client" ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-600"
+                    }`}>
+                      {c.name.charAt(0)}
+                    </span>
+                    <span>{c.name}</span>
+                    {c.company && <span className="text-gray-400 ml-auto">{c.company}</span>}
+                  </button>
+                ))
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Action Items from this transcript */}
       {transcript.actionItems.length > 0 && (
