@@ -2,13 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { Transcript } from "@/lib/types";
-import {
-  transcripts as mockTranscripts,
-  getAllActionItems,
-  getAllCallItems,
-  getAllErrandItems,
-  getWeekDates,
-} from "@/lib/mock-data";
+import { getWeekDates } from "@/lib/mock-data";
 import { loadTranscripts } from "@/lib/store";
 import WeekCalendar from "@/components/WeekCalendar";
 import SummaryBar from "@/components/SummaryBar";
@@ -18,40 +12,31 @@ import ImportButton from "@/components/ImportButton";
 
 export default function Dashboard() {
   const [selectedTranscript, setSelectedTranscript] = useState<Transcript | null>(null);
-  const [importedTranscripts, setImportedTranscripts] = useState<Transcript[]>([]);
+  const [transcripts, setTranscripts] = useState<Transcript[]>([]);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    setImportedTranscripts(loadTranscripts());
+    setTranscripts(loadTranscripts());
     setMounted(true);
   }, []);
-
-  const allTranscripts = [...mockTranscripts, ...importedTranscripts];
 
   const thisWeek = getWeekDates(0);
   const nextWeek = getWeekDates(1);
 
-  const thisWeekTranscripts = allTranscripts.filter((t) => thisWeek.includes(t.date));
-  const nextWeekTranscripts = allTranscripts.filter((t) => nextWeek.includes(t.date));
+  const thisWeekTranscripts = transcripts.filter((t) => thisWeek.includes(t.date));
+  const nextWeekTranscripts = transcripts.filter((t) => nextWeek.includes(t.date));
 
-  const actionItems = getAllActionItems().concat(
-    importedTranscripts.flatMap((t) => t.actionItems)
-  );
-  const callItems = getAllCallItems().concat(
-    importedTranscripts.flatMap((t) => t.calls)
-  );
-  const errandItems = getAllErrandItems().concat(
-    importedTranscripts.flatMap((t) => t.errands)
-  );
+  const actionItems = transcripts.flatMap((t) => t.actionItems);
+  const callItems = transcripts.flatMap((t) => t.calls);
+  const errandItems = transcripts.flatMap((t) => t.errands);
 
   const handleImport = useCallback((newTranscripts: Transcript[]) => {
-    setImportedTranscripts((prev) => [...prev, ...newTranscripts]);
+    setTranscripts((prev) => [...prev, ...newTranscripts]);
   }, []);
 
-  // Helper to pass all transcripts to WeekCalendar
   const getTranscriptsForDate = useCallback(
-    (date: string) => allTranscripts.filter((t) => t.date === date),
-    [allTranscripts]
+    (date: string) => transcripts.filter((t) => t.date === date),
+    [transcripts]
   );
 
   if (!mounted) return null;
