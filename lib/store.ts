@@ -1,7 +1,7 @@
 "use client";
 
 import { Transcript, ActionItem, CallItem, ErrandItem, Tag } from "./types";
-import { srtToTranscript } from "./srt-parser";
+import { srtToSegments } from "./srt-parser";
 import { parseJsonTranscripts, isJsonString } from "./json-parser";
 
 const STORAGE_KEY = "plaud-transcripts";
@@ -61,35 +61,34 @@ export function saveLists(lists: StoredLists): void {
   localStorage.setItem(LISTS_KEY, JSON.stringify(lists));
 }
 
-export async function importSrtFile(file: File, recordingStart: Date): Promise<Transcript> {
+export async function importSrtFile(file: File, recordingStart: Date): Promise<Transcript[]> {
   const content = await file.text();
-  const parsed = srtToTranscript(file.name, content, recordingStart);
+  const segments = srtToSegments(file.name, content, recordingStart);
 
-  const title = file.name
-    .replace(/\.srt$/i, "")
-    .replace(/[_-]/g, " ")
-    .replace(/\b\w/g, (c) => c.toUpperCase());
+  if (segments.length === 0) {
+    throw new Error("No valid SRT entries found in file");
+  }
 
-  const transcript: Transcript = {
+  const newTranscripts: Transcript[] = segments.map((seg) => ({
     id: generateId(),
-    title,
-    date: parsed.date,
-    startTime: parsed.startTime,
-    duration: parsed.duration,
-    summary: truncate(parsed.fullText, 300),
-    fullTranscript: parsed.fullText,
-    participants: parsed.participants,
-    tags: guessTag(file.name, parsed.fullText),
+    title: (seg as { segmentTitle?: string }).segmentTitle || seg.fileName,
+    date: seg.date,
+    startTime: seg.startTime,
+    duration: seg.duration,
+    summary: truncate(seg.fullText, 300),
+    fullTranscript: seg.fullText,
+    participants: seg.participants,
+    tags: guessTag(file.name, seg.fullText),
     actionItems: [],
     calls: [],
     errands: [],
-  };
+  }));
 
   const transcripts = loadTranscripts();
-  transcripts.push(transcript);
+  transcripts.push(...newTranscripts);
   saveTranscripts(transcripts);
 
-  return transcript;
+  return newTranscripts;
 }
 
 export async function importJsonFile(file: File): Promise<Transcript[]> {
@@ -107,8 +106,8 @@ export async function importFiles(files: FileList, recordingStart?: Date): Promi
     const name = file.name.toLowerCase();
     if (name.endsWith(".srt")) {
       const start = recordingStart || new Date(file.lastModified);
-      const t = await importSrtFile(file, start);
-      results.push(t);
+      const ts = await importSrtFile(file, start);
+      results.push(...ts);
     } else if (name.endsWith(".json")) {
       const ts = await importJsonFile(file);
       results.push(...ts);
@@ -138,25 +137,28 @@ export function importFromText(text: string, recordingStart?: Date): Transcript[
   const looksLikeSrt = /\d+\s*\n\d{2}:\d{2}:\d{2}[,.]\d+\s*-->/.test(trimmed);
   if (looksLikeSrt) {
     const start = recordingStart || new Date();
-    const parsed = srtToTranscript("Pasted Transcript", trimmed, start);
-    const transcript: Transcript = {
+    const segments = srtToSegments("Pasted Transcript", trimmed, start);
+    if (segments.length === 0) return [];
+
+    const newTranscripts: Transcript[] = segments.map((seg) => ({
       id: generateId(),
-      title: `Pasted Recording - ${start.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`,
-      date: parsed.date,
-      startTime: parsed.startTime,
-      duration: parsed.duration,
-      summary: truncate(parsed.fullText, 300),
-      participants: parsed.participants,
-      tags: guessTag("", parsed.fullText),
+      title: (seg as { segmentTitle?: string }).segmentTitle || `Pasted Recording - ${start.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`,
+      date: seg.date,
+      startTime: seg.startTime,
+      duration: seg.duration,
+      summary: truncate(seg.fullText, 300),
+      fullTranscript: seg.fullText,
+      participants: seg.participants,
+      tags: guessTag("", seg.fullText),
       actionItems: [],
       calls: [],
       errands: [],
-    };
+    }));
 
     const transcripts = loadTranscripts();
-    transcripts.push(transcript);
+    transcripts.push(...newTranscripts);
     saveTranscripts(transcripts);
-    return [transcript];
+    return newTranscripts;
   }
 
   // Plain text

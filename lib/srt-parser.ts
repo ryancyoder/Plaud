@@ -82,46 +82,90 @@ export interface ParsedTranscript {
 }
 
 /**
- * Parse an SRT file into a transcript.
- * @param fileName - original file name
- * @param content - SRT file content
- * @param recordingStart - absolute date/time the recording began
+ * Parse an SRT file into a single transcript (legacy, used for short files).
  */
 export function srtToTranscript(
   fileName: string,
   content: string,
   recordingStart: Date,
 ): ParsedTranscript {
-  let entries = parseSrt(content);
-  if (entries.length === 0) {
+  const segments = srtToSegments(fileName, content, recordingStart);
+  if (segments.length === 0) {
     throw new Error("No valid SRT entries found in file");
   }
+  // If only one segment, return it directly
+  if (segments.length === 1) return segments[0];
+  // Otherwise merge into one (shouldn't normally be called for multi-segment)
+  return segments[0];
+}
+
+/**
+ * Split an SRT file into multiple segments based on gaps in speech.
+ * A gap of `gapThresholdSeconds` or more between entries starts a new segment.
+ * Each segment becomes its own transcript with absolute timestamps.
+ */
+export function srtToSegments(
+  fileName: string,
+  content: string,
+  recordingStart: Date,
+  gapThresholdSeconds = 60,
+): ParsedTranscript[] {
+  let entries = parseSrt(content);
+  if (entries.length === 0) return [];
 
   // Apply absolute timestamps
   entries = applyAbsoluteTimestamps(entries, recordingStart);
 
-  const firstEntry = entries[0];
-  const lastEntry = entries[entries.length - 1];
-  const durationSeconds = lastEntry.endSeconds - firstEntry.startSeconds;
-  const durationMinutes = Math.max(1, Math.round(durationSeconds / 60));
+  // Group entries into segments by detecting gaps
+  const segments: SrtEntry[][] = [];
+  let currentSegment: SrtEntry[] = [entries[0]];
 
-  // Extract unique speaker names (lines starting with "Speaker:" or "Name:" patterns)
-  const speakerPattern = /^([A-Z][a-zA-Z\s]+?):\s/;
-  const speakers = new Set<string>();
-  for (const entry of entries) {
-    const match = entry.text.match(speakerPattern);
-    if (match) speakers.add(match[1].trim());
+  for (let i = 1; i < entries.length; i++) {
+    const prev = entries[i - 1];
+    const curr = entries[i];
+    const gap = curr.startSeconds - prev.endSeconds;
+
+    if (gap >= gapThresholdSeconds) {
+      segments.push(currentSegment);
+      currentSegment = [curr];
+    } else {
+      currentSegment.push(curr);
+    }
   }
+  segments.push(currentSegment);
 
-  const fullText = entries.map((e) => e.text).join(" ");
+  // Convert each segment group into a ParsedTranscript
+  const baseName = fileName.replace(/\.srt$/i, "").replace(/[_-]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
-  return {
-    fileName,
-    date: formatDateYMD(recordingStart),
-    startTime: formatTimeHHMM(recordingStart),
-    duration: durationMinutes,
-    fullText,
-    entries,
-    participants: Array.from(speakers),
-  };
+  return segments.map((segEntries, idx) => {
+    const first = segEntries[0];
+    const last = segEntries[segEntries.length - 1];
+    const durationSeconds = last.endSeconds - first.startSeconds;
+    const durationMinutes = Math.max(1, Math.round(durationSeconds / 60));
+
+    // Extract speakers
+    const speakerPattern = /^([A-Z][a-zA-Z\s]+?):\s/;
+    const speakers = new Set<string>();
+    for (const entry of segEntries) {
+      const match = entry.text.match(speakerPattern);
+      if (match) speakers.add(match[1].trim());
+    }
+
+    const fullText = segEntries.map((e) => e.text).join(" ");
+    const segStart = first.absoluteStart || recordingStart;
+
+    return {
+      fileName,
+      date: formatDateYMD(segStart),
+      startTime: formatTimeHHMM(segStart),
+      duration: durationMinutes,
+      fullText,
+      entries: segEntries,
+      participants: Array.from(speakers),
+      // Add a readable title with segment number and time
+      segmentTitle: segments.length > 1
+        ? `${baseName} — Segment ${idx + 1} (${formatTimeHHMM(segStart)})`
+        : baseName,
+    };
+  });
 }
