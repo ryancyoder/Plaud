@@ -85,6 +85,19 @@ export default function Dashboard() {
         </div>
       </header>
 
+      {/* Debug bar - shows transcript count and date range */}
+      {transcripts.length > 0 && (
+        <div className="shrink-0 px-5 py-1.5 bg-gray-50 border-b border-border text-xs text-muted flex items-center gap-4">
+          <span>{transcripts.length} transcripts loaded</span>
+          <span>
+            Dates: {transcripts.map((t) => t.date).sort()[0]} to{" "}
+            {transcripts.map((t) => t.date).sort().reverse()[0]}
+          </span>
+          <span>Viewing: {currentWeek[0]} to {currentWeek[6]}</span>
+          <span>Matches this view: {currentWeekTranscripts.length}</span>
+        </div>
+      )}
+
       {/* Main content */}
       <div className="flex-1 flex overflow-hidden">
         {/* Left: Calendar area */}
