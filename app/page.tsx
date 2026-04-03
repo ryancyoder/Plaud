@@ -10,9 +10,20 @@ import SidebarLists from "@/components/SidebarLists";
 import TranscriptDetail from "@/components/TranscriptDetail";
 import ImportButton from "@/components/ImportButton";
 
+function getWeekLabel(weekDates: string[]): string {
+  const start = new Date(weekDates[0] + "T00:00:00");
+  const end = new Date(weekDates[6] + "T00:00:00");
+  const opts: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" };
+  if (start.getFullYear() !== end.getFullYear()) {
+    return `${start.toLocaleDateString("en-US", { ...opts, year: "numeric" })} – ${end.toLocaleDateString("en-US", { ...opts, year: "numeric" })}`;
+  }
+  return `${start.toLocaleDateString("en-US", opts)} – ${end.toLocaleDateString("en-US", opts)}, ${start.getFullYear()}`;
+}
+
 export default function Dashboard() {
   const [selectedTranscript, setSelectedTranscript] = useState<Transcript | null>(null);
   const [transcripts, setTranscripts] = useState<Transcript[]>([]);
+  const [weekOffset, setWeekOffset] = useState(0);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -20,11 +31,8 @@ export default function Dashboard() {
     setMounted(true);
   }, []);
 
-  const thisWeek = getWeekDates(0);
-  const nextWeek = getWeekDates(1);
-
-  const thisWeekTranscripts = transcripts.filter((t) => thisWeek.includes(t.date));
-  const nextWeekTranscripts = transcripts.filter((t) => nextWeek.includes(t.date));
+  const currentWeek = getWeekDates(weekOffset);
+  const currentWeekTranscripts = transcripts.filter((t) => currentWeek.includes(t.date));
 
   const actionItems = transcripts.flatMap((t) => t.actionItems);
   const callItems = transcripts.flatMap((t) => t.calls);
@@ -47,6 +55,8 @@ export default function Dashboard() {
   );
 
   if (!mounted) return null;
+
+  const isCurrentWeek = weekOffset === 0;
 
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-background">
@@ -72,35 +82,60 @@ export default function Dashboard() {
               Clear Data
             </button>
           )}
-          <div className="text-sm text-muted">
-            {new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}
-          </div>
         </div>
       </header>
 
       {/* Main content */}
       <div className="flex-1 flex overflow-hidden">
         {/* Left: Calendar area */}
-        <div className="flex-1 flex flex-col overflow-y-auto p-4 gap-4">
-          {/* This Week Summary */}
+        <div className="flex-1 flex flex-col overflow-y-auto p-4 gap-3">
+          {/* Week navigation */}
+          <div className="flex items-center justify-between">
+            <button
+              onClick={() => setWeekOffset((w) => w - 1)}
+              className="flex items-center gap-1 px-3 py-2 rounded-lg text-sm font-medium text-muted hover:bg-gray-100 active:scale-95 transition-all"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="15 18 9 12 15 6" />
+              </svg>
+              Prev
+            </button>
+
+            <div className="flex items-center gap-3">
+              <h2 className="text-base font-bold">{getWeekLabel(currentWeek)}</h2>
+              {!isCurrentWeek && (
+                <button
+                  onClick={() => setWeekOffset(0)}
+                  className="text-xs px-2.5 py-1 rounded-full bg-accent text-white hover:bg-blue-600 active:scale-95 transition-all"
+                >
+                  Today
+                </button>
+              )}
+            </div>
+
+            <button
+              onClick={() => setWeekOffset((w) => w + 1)}
+              className="flex items-center gap-1 px-3 py-2 rounded-lg text-sm font-medium text-muted hover:bg-gray-100 active:scale-95 transition-all"
+            >
+              Next
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="9 18 15 12 9 6" />
+              </svg>
+            </button>
+          </div>
+
+          {/* Week Summary */}
           <SummaryBar
-            label="This Week"
-            transcripts={thisWeekTranscripts}
-            variant="this-week"
+            label={getWeekLabel(currentWeek)}
+            transcripts={currentWeekTranscripts}
+            variant={isCurrentWeek ? "this-week" : "next-week"}
           />
 
           {/* Calendar */}
           <WeekCalendar
-            weekDates={thisWeek}
+            weekDates={currentWeek}
             onSelectTranscript={setSelectedTranscript}
             getTranscriptsForDate={getTranscriptsForDate}
-          />
-
-          {/* Next Week Summary */}
-          <SummaryBar
-            label="Next Week"
-            transcripts={nextWeekTranscripts}
-            variant="next-week"
           />
         </div>
 
