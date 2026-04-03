@@ -1,16 +1,16 @@
 "use client";
 
 import { Transcript } from "@/lib/types";
-import { getTranscriptsForDate } from "@/lib/mock-data";
 import { getDayName, getDayNumber, isToday, isPast } from "@/lib/utils";
 import TranscriptBlock from "./TranscriptBlock";
 
 interface WeekCalendarProps {
   weekDates: string[];
   onSelectTranscript: (transcript: Transcript) => void;
+  getTranscriptsForDate: (date: string) => Transcript[];
 }
 
-export default function WeekCalendar({ weekDates, onSelectTranscript }: WeekCalendarProps) {
+export default function WeekCalendar({ weekDates, onSelectTranscript, getTranscriptsForDate }: WeekCalendarProps) {
   return (
     <div className="grid grid-cols-7 gap-px bg-border rounded-xl overflow-hidden shadow-sm">
       {weekDates.map((date) => {
