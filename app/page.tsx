@@ -17,6 +17,8 @@ import SummaryBar from "@/components/SummaryBar";
 import ViewerPanel from "@/components/ViewerPanel";
 import ClientRoster from "@/components/ClientRoster";
 import ImportButton from "@/components/ImportButton";
+import BatchPhotoImport from "@/components/BatchPhotoImport";
+import { PhotoMatchResult } from "@/lib/photo-matcher";
 
 function getWeekLabel(weekDates: string[]): string {
   const start = new Date(weekDates[0] + "T00:00:00");
@@ -163,6 +165,36 @@ export default function Dashboard() {
     );
   }, []);
 
+  const handleBatchPhotos = useCallback(async (results: PhotoMatchResult[]) => {
+    // Save all matched attachments to IndexedDB
+    for (const r of results) {
+      await dbSaveAttachments(r.transcriptId, r.attachments);
+    }
+
+    // Update in-memory transcript state
+    setTranscripts((prev) => {
+      const updated = prev.map((t) => {
+        const match = results.find((r) => r.transcriptId === t.id);
+        if (!match) return t;
+        return { ...t, attachments: [...(t.attachments || []), ...match.attachments] };
+      });
+      const forStorage = updated.map((t) => ({
+        ...t,
+        attachments: (t.attachments || []).map(({ dataUrl, ...rest }) => ({ ...rest, dataUrl: "" })),
+      }));
+      saveTranscripts(forStorage);
+      return updated;
+    });
+
+    // Update selected transcript if affected
+    setSelectedTranscript((prev) => {
+      if (!prev) return prev;
+      const match = results.find((r) => r.transcriptId === prev.id);
+      if (!match) return prev;
+      return { ...prev, attachments: [...(prev.attachments || []), ...match.attachments] };
+    });
+  }, []);
+
   const getTranscriptsForDate = useCallback(
     (date: string) => visibleTranscripts.filter((t) => t.date === date),
     [visibleTranscripts]
@@ -239,6 +271,7 @@ export default function Dashboard() {
             </button>
           </div>
           <ImportButton onImport={handleImport} />
+          <BatchPhotoImport transcripts={transcripts} onPhotosMatched={handleBatchPhotos} />
           {transcripts.length > 0 && (
             <button
               onClick={handleClearData}
