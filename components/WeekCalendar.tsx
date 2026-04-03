@@ -1,7 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import { Transcript } from "@/lib/types";
-import { getDayName, getDayNumber, isToday, isPast } from "@/lib/utils";
+import { getDayName, getDayNumber, isToday, isPast, formatDuration, getBlockColor, getTagColor } from "@/lib/utils";
 import TranscriptBlock from "./TranscriptBlock";
 
 interface WeekCalendarProps {
@@ -10,13 +11,14 @@ interface WeekCalendarProps {
   getTranscriptsForDate: (date: string) => Transcript[];
 }
 
+const SHORT_THRESHOLD = 30; // minutes
+
 // Time axis config
-const START_HOUR = 6; // 6 AM
-const END_HOUR = 22; // 10 PM
+const START_HOUR = 6;
+const END_HOUR = 22;
 const TOTAL_HOURS = END_HOUR - START_HOUR;
 const PX_PER_HOUR = 80;
 const TOTAL_HEIGHT = TOTAL_HOURS * PX_PER_HOUR;
-const MIN_BLOCK_HEIGHT = 40; // minimum height even for very short recordings
 
 function timeToOffset(timeStr: string): number {
   const [h, m] = timeStr.split(":").map(Number);
@@ -25,7 +27,7 @@ function timeToOffset(timeStr: string): number {
 }
 
 function durationToHeight(minutes: number): number {
-  return Math.max(MIN_BLOCK_HEIGHT, (minutes / 60) * PX_PER_HOUR);
+  return Math.max(50, (minutes / 60) * PX_PER_HOUR);
 }
 
 function formatHour(hour: number): string {
@@ -35,7 +37,17 @@ function formatHour(hour: number): string {
 }
 
 export default function WeekCalendar({ weekDates, onSelectTranscript, getTranscriptsForDate }: WeekCalendarProps) {
+  const [expandedDays, setExpandedDays] = useState<Set<string>>(new Set());
   const hours = Array.from({ length: TOTAL_HOURS }, (_, i) => START_HOUR + i);
+
+  function toggleShortList(date: string) {
+    setExpandedDays((prev) => {
+      const next = new Set(prev);
+      if (next.has(date)) next.delete(date);
+      else next.add(date);
+      return next;
+    });
+  }
 
   return (
     <div className="bg-surface rounded-xl shadow-sm border border-border overflow-hidden">
@@ -45,6 +57,9 @@ export default function WeekCalendar({ weekDates, onSelectTranscript, getTranscr
         {weekDates.map((date) => {
           const today = isToday(date);
           const past = isPast(date);
+          const allTranscripts = getTranscriptsForDate(date);
+          const shortCount = allTranscripts.filter((t) => t.duration < SHORT_THRESHOLD).length;
+
           return (
             <div
               key={date}
@@ -56,13 +71,76 @@ export default function WeekCalendar({ weekDates, onSelectTranscript, getTranscr
               <div className={`text-lg font-bold ${today ? "text-white" : ""}`}>
                 {getDayNumber(date)}
               </div>
+              {shortCount > 0 && (
+                <button
+                  onClick={() => toggleShortList(date)}
+                  className={`mt-1 text-[10px] px-2 py-0.5 rounded-full transition-colors ${
+                    expandedDays.has(date)
+                      ? today
+                        ? "bg-white/30 text-white"
+                        : "bg-accent-light text-accent"
+                      : today
+                        ? "bg-white/20 text-white/80 hover:bg-white/30"
+                        : "bg-gray-100 text-muted hover:bg-gray-200"
+                  }`}
+                >
+                  {shortCount} short
+                </button>
+              )}
             </div>
           );
         })}
       </div>
 
+      {/* Short transcripts list (expandable per day) */}
+      {weekDates.some((d) => expandedDays.has(d)) && (
+        <div className="grid grid-cols-[60px_repeat(7,1fr)] border-b border-border bg-gray-50/50">
+          <div className="px-2 py-2 flex items-start justify-end">
+            <span className="text-[10px] text-muted uppercase font-semibold">Quick</span>
+          </div>
+          {weekDates.map((date) => {
+            const allTranscripts = getTranscriptsForDate(date);
+            const shortTranscripts = allTranscripts
+              .filter((t) => t.duration < SHORT_THRESHOLD)
+              .sort((a, b) => a.startTime.localeCompare(b.startTime));
+            const isExpanded = expandedDays.has(date);
+
+            return (
+              <div key={date} className="border-l border-border px-1 py-1.5">
+                {isExpanded && shortTranscripts.length > 0 ? (
+                  <div className="space-y-1">
+                    {shortTranscripts.map((t) => {
+                      const primaryTag = t.tags[0];
+                      const tagColor = primaryTag ? getTagColor(primaryTag) : { bg: "bg-gray-100", text: "text-gray-700" };
+                      return (
+                        <button
+                          key={t.id}
+                          onClick={() => onSelectTranscript(t)}
+                          className="w-full text-left px-2 py-1.5 rounded-md hover:bg-white active:bg-gray-100 transition-colors"
+                        >
+                          <div className="flex items-center gap-1.5">
+                            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${tagColor.bg.replace("100", "500")}`} />
+                            <span className="text-[11px] font-medium truncate">{t.title}</span>
+                          </div>
+                          <div className="flex items-center gap-1 ml-3 mt-0.5">
+                            <span className="text-[10px] text-muted">{t.startTime}</span>
+                            <span className="text-[10px] text-muted">· {formatDuration(t.duration)}</span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="h-4" />
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       {/* Scrollable time grid */}
-      <div className="overflow-y-auto" style={{ maxHeight: "calc(100vh - 280px)" }}>
+      <div className="overflow-y-auto" style={{ maxHeight: "calc(100vh - 320px)" }}>
         <div className="grid grid-cols-[60px_repeat(7,1fr)] relative" style={{ height: TOTAL_HEIGHT }}>
           {/* Time axis */}
           <div className="relative">
@@ -79,7 +157,8 @@ export default function WeekCalendar({ weekDates, onSelectTranscript, getTranscr
 
           {/* Day columns */}
           {weekDates.map((date) => {
-            const transcripts = getTranscriptsForDate(date);
+            const allTranscripts = getTranscriptsForDate(date);
+            const longTranscripts = allTranscripts.filter((t) => t.duration >= SHORT_THRESHOLD);
             const today = isToday(date);
 
             return (
@@ -96,8 +175,8 @@ export default function WeekCalendar({ weekDates, onSelectTranscript, getTranscr
                   />
                 ))}
 
-                {/* Transcript blocks */}
-                {transcripts.map((t) => {
+                {/* Only plot transcripts >= 30 min on the time grid */}
+                {longTranscripts.map((t) => {
                   const top = timeToOffset(t.startTime);
                   const height = durationToHeight(t.duration);
 
