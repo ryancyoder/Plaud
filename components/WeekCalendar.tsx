@@ -238,7 +238,7 @@ function TranscriptRow({ transcript, onSelect, isSelected }: TranscriptRowProps)
       {/* Content */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
-          <h4 className="text-sm font-semibold truncate">{transcript.title}</h4>
+          <h4 className="text-sm font-semibold truncate">{transcript.title.length > 60 ? transcript.title.slice(0, 60) + "..." : transcript.title}</h4>
           {transcript.tags.map((tag) => {
             const c = getTagColor(tag);
             return (
@@ -258,12 +258,6 @@ function TranscriptRow({ transcript, onSelect, isSelected }: TranscriptRowProps)
             </span>
           )}
         </div>
-        <p className="text-xs text-muted mt-0.5 line-clamp-2">{transcript.summary}</p>
-        {transcript.participants.length > 0 && (
-          <p className="text-[11px] text-muted mt-1">
-            {transcript.participants.join(", ")}
-          </p>
-        )}
       </div>
 
       {/* Arrow */}
