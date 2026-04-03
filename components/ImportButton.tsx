@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { importMultipleSrtFiles, importFromClipboardText } from "@/lib/store";
+import { importFiles, importFromText } from "@/lib/store";
 import { Transcript } from "@/lib/types";
 
 interface ImportButtonProps {
@@ -19,11 +19,15 @@ export default function ImportButton({ onImport }: ImportButtonProps) {
     if (!files || files.length === 0) return;
     setImporting(true);
     try {
-      const imported = await importMultipleSrtFiles(files);
+      const imported = await importFiles(files);
       if (imported.length > 0) {
         onImport(imported);
         toast(`${imported.length} transcript${imported.length > 1 ? "s" : ""} imported`);
+      } else {
+        toast("No .srt or .json files found");
       }
+    } catch (e) {
+      toast(`Import error: ${e instanceof Error ? e.message : "Unknown error"}`);
     } finally {
       setImporting(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -32,16 +36,20 @@ export default function ImportButton({ onImport }: ImportButtonProps) {
 
   function handlePasteSubmit() {
     const text = pasteRef.current?.value;
-    if (!text || text.trim().length < 10) {
+    if (!text || text.trim().length < 5) {
       toast("Paste some transcript text first");
       return;
     }
-    const transcript = importFromClipboardText(text);
-    if (transcript) {
-      onImport([transcript]);
-      toast("Transcript imported");
-      setShowPasteArea(false);
-      if (pasteRef.current) pasteRef.current.value = "";
+    try {
+      const transcripts = importFromText(text);
+      if (transcripts.length > 0) {
+        onImport(transcripts);
+        toast(`${transcripts.length} transcript${transcripts.length > 1 ? "s" : ""} imported`);
+        setShowPasteArea(false);
+        if (pasteRef.current) pasteRef.current.value = "";
+      }
+    } catch (e) {
+      toast(`Parse error: ${e instanceof Error ? e.message : "Unknown error"}`);
     }
   }
 
@@ -55,7 +63,7 @@ export default function ImportButton({ onImport }: ImportButtonProps) {
       <input
         ref={fileInputRef}
         type="file"
-        accept=".srt"
+        accept=".srt,.json"
         multiple
         className="hidden"
         onChange={(e) => handleFiles(e.target.files)}
@@ -91,7 +99,7 @@ export default function ImportButton({ onImport }: ImportButtonProps) {
                 <polyline points="17 8 12 3 7 8" />
                 <line x1="12" x2="12" y1="3" y2="15" />
               </svg>
-              Import SRT
+              Import
             </>
           )}
         </button>
@@ -118,12 +126,12 @@ export default function ImportButton({ onImport }: ImportButtonProps) {
         <div className="fixed top-14 left-0 right-0 z-40 bg-surface border-b border-border shadow-lg p-4">
           <div className="max-w-2xl mx-auto">
             <p className="text-sm text-muted mb-2">
-              Tap the box below, then long-press and select Paste to paste your transcript:
+              Tap the box below, then long-press and select Paste to paste your transcript (SRT, JSON, or plain text):
             </p>
             <textarea
               ref={pasteRef}
               autoFocus
-              placeholder="Tap here, then paste your SRT or transcript text..."
+              placeholder="Tap here, then paste your SRT, JSON, or transcript text..."
               className="w-full h-32 p-3 border border-border rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent"
             />
             <div className="flex gap-2 mt-2 justify-end">
@@ -140,7 +148,7 @@ export default function ImportButton({ onImport }: ImportButtonProps) {
                 onClick={handlePasteSubmit}
                 className="px-4 py-2 rounded-lg text-sm font-medium bg-accent text-white hover:bg-blue-600 active:scale-95"
               >
-                Import Pasted Text
+                Import
               </button>
             </div>
           </div>

@@ -2,6 +2,7 @@
 
 import { Transcript, ActionItem, CallItem, ErrandItem, Tag } from "./types";
 import { srtToTranscript } from "./srt-parser";
+import { parseJsonTranscripts, isJsonString } from "./json-parser";
 
 const STORAGE_KEY = "plaud-transcripts";
 const LISTS_KEY = "plaud-lists";
@@ -94,24 +95,49 @@ export async function importSrtFile(file: File): Promise<Transcript> {
   return transcript;
 }
 
-export async function importMultipleSrtFiles(files: FileList): Promise<Transcript[]> {
+export async function importJsonFile(file: File): Promise<Transcript[]> {
+  const content = await file.text();
+  const parsed = parseJsonTranscripts(content);
+  const transcripts = loadTranscripts();
+  transcripts.push(...parsed);
+  saveTranscripts(transcripts);
+  return parsed;
+}
+
+export async function importFiles(files: FileList): Promise<Transcript[]> {
   const results: Transcript[] = [];
   for (const file of Array.from(files)) {
-    if (file.name.toLowerCase().endsWith(".srt")) {
+    const name = file.name.toLowerCase();
+    if (name.endsWith(".srt")) {
       const t = await importSrtFile(file);
       results.push(t);
+    } else if (name.endsWith(".json")) {
+      const ts = await importJsonFile(file);
+      results.push(...ts);
     }
   }
   return results;
 }
 
-export function importFromClipboardText(text: string): Transcript | null {
+export function importFromText(text: string): Transcript[] {
   const trimmed = text.trim();
-  if (!trimmed) return null;
+  if (!trimmed) return [];
 
-  // Check if it looks like SRT content (has numbered blocks with timestamps)
+  // JSON
+  if (isJsonString(trimmed)) {
+    try {
+      const parsed = parseJsonTranscripts(trimmed);
+      const transcripts = loadTranscripts();
+      transcripts.push(...parsed);
+      saveTranscripts(transcripts);
+      return parsed;
+    } catch {
+      // Fall through to other formats
+    }
+  }
+
+  // SRT
   const looksLikeSrt = /\d+\s*\n\d{2}:\d{2}:\d{2}[,.]\d+\s*-->/.test(trimmed);
-
   if (looksLikeSrt) {
     const parsed = srtToTranscript("Pasted Transcript", trimmed);
     const transcript: Transcript = {
@@ -131,10 +157,10 @@ export function importFromClipboardText(text: string): Transcript | null {
     const transcripts = loadTranscripts();
     transcripts.push(transcript);
     saveTranscripts(transcripts);
-    return transcript;
+    return [transcript];
   }
 
-  // Plain text — treat as a raw transcript note
+  // Plain text
   const transcript: Transcript = {
     id: generateId(),
     title: `Pasted Note - ${new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`,
@@ -152,7 +178,7 @@ export function importFromClipboardText(text: string): Transcript | null {
   const transcripts = loadTranscripts();
   transcripts.push(transcript);
   saveTranscripts(transcripts);
-  return transcript;
+  return [transcript];
 }
 
 export function deleteTranscript(id: string): void {

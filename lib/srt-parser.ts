@@ -88,9 +88,24 @@ export function srtToTranscript(
   }
 
   const fullText = entries.map((e) => e.text).join(" ");
-  const date = fileDate
-    ? fileDate.toISOString().split("T")[0]
-    : new Date().toISOString().split("T")[0];
+
+  // Try to extract date from filename first (e.g. "2026-04-03_meeting.srt", "meeting_20260403.srt")
+  let date: string | null = null;
+  const isoMatch = fileName.match(/(\d{4}-\d{2}-\d{2})/);
+  if (isoMatch) {
+    date = isoMatch[1];
+  } else {
+    const compactMatch = fileName.match(/(\d{4})(\d{2})(\d{2})/);
+    if (compactMatch) {
+      date = `${compactMatch[1]}-${compactMatch[2]}-${compactMatch[3]}`;
+    }
+  }
+  if (!date && fileDate) {
+    date = fileDate.toISOString().split("T")[0];
+  }
+  if (!date) {
+    date = new Date().toISOString().split("T")[0];
+  }
 
   return {
     fileName,
