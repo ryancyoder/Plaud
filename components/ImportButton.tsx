@@ -156,7 +156,7 @@ export default function ImportButton({ onImport }: ImportButtonProps) {
       <input
         ref={fileInputRef}
         type="file"
-        accept=".srt,.json"
+        accept="*/*"
         multiple
         className="hidden"
         onChange={(e) => handleFileSelect(e.target.files)}
