@@ -39,6 +39,11 @@ interface RawRecording {
   speakers?: string[];
   attendees?: string[];
 
+  transcript_type?: string;
+  transcriptType?: string;
+  transcript_summary?: string;
+  transcriptSummary?: string;
+
   tags?: string[];
   category?: string;
   type?: string;
@@ -168,12 +173,61 @@ function guessTag(title: string, text: string): Tag[] {
   return tags;
 }
 
+const VALID_TAGS: Tag[] = ["meeting", "call", "personal", "medical", "errand", "brainstorm", "interview"];
+
+function extractTags(raw: RawRecording, title: string, text: string): Tag[] {
+  // First check transcript_type / type / category
+  const typeStr = raw.transcript_type || raw.transcriptType || raw.type || raw.category;
+  if (typeStr) {
+    const normalized = typeStr.toLowerCase().trim();
+    if (VALID_TAGS.includes(normalized as Tag)) {
+      return [normalized as Tag];
+    }
+    // Try mapping common synonyms
+    const synonyms: Record<string, Tag> = {
+      "phone call": "call",
+      "phone": "call",
+      "appointment": "medical",
+      "doctor": "medical",
+      "dentist": "medical",
+      "standup": "meeting",
+      "sync": "meeting",
+      "1:1": "meeting",
+      "one on one": "meeting",
+      "catch up": "personal",
+      "lunch": "personal",
+      "dinner": "personal",
+      "shopping": "errand",
+      "grocery": "errand",
+      "idea": "brainstorm",
+    };
+    if (synonyms[normalized]) {
+      return [synonyms[normalized]];
+    }
+  }
+
+  // Then check tags array
+  if (raw.tags) {
+    const matched = raw.tags
+      .map((t) => t.toLowerCase().trim())
+      .filter((t): t is Tag => VALID_TAGS.includes(t as Tag));
+    if (matched.length > 0) return matched;
+  }
+
+  // Fall back to guessing from content
+  return guessTag(title, text);
+}
+
+function extractSummary(raw: RawRecording): string {
+  // Prefer explicit summary fields over truncating transcript
+  const summary = raw.transcript_summary || raw.transcriptSummary || raw.summary;
+  if (summary) return summary;
+  return truncate(extractText(raw), 300);
+}
+
 function rawToTranscript(raw: RawRecording): Transcript {
   const title = extractTitle(raw);
   const text = extractText(raw);
-  const userTags = raw.tags?.filter((t): t is Tag =>
-    ["meeting", "call", "personal", "medical", "errand", "brainstorm", "interview"].includes(t)
-  );
 
   return {
     id: generateId(),
@@ -181,9 +235,9 @@ function rawToTranscript(raw: RawRecording): Transcript {
     date: extractDate(raw),
     startTime: extractTime(raw),
     duration: extractDuration(raw),
-    summary: truncate(text, 300),
+    summary: extractSummary(raw),
     participants: extractParticipants(raw),
-    tags: userTags && userTags.length > 0 ? userTags : guessTag(title, text),
+    tags: extractTags(raw, title, text),
     actionItems: [],
     calls: [],
     errands: [],
