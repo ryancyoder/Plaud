@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useEffect, useCallback } from "react";
+import { useRef, useState } from "react";
 import { importMultipleSrtFiles, importFromClipboardText } from "@/lib/store";
 import { Transcript } from "@/lib/types";
 
@@ -11,7 +11,7 @@ interface ImportButtonProps {
 export default function ImportButton({ onImport }: ImportButtonProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
-  const [showPasteToast, setShowPasteToast] = useState(false);
+  const [showToast, setShowToast] = useState<string | null>(null);
 
   async function handleFiles(files: FileList | null) {
     if (!files || files.length === 0) return;
@@ -20,6 +20,7 @@ export default function ImportButton({ onImport }: ImportButtonProps) {
       const imported = await importMultipleSrtFiles(files);
       if (imported.length > 0) {
         onImport(imported);
+        toast(`${imported.length} transcript${imported.length > 1 ? "s" : ""} imported`);
       }
     } finally {
       setImporting(false);
@@ -27,32 +28,27 @@ export default function ImportButton({ onImport }: ImportButtonProps) {
     }
   }
 
-  const handlePaste = useCallback(
-    (e: ClipboardEvent) => {
-      const text = e.clipboardData?.getData("text/plain");
-      if (!text || text.trim().length < 10) return;
-
-      // Don't intercept paste if user is typing in an input
-      const target = e.target as HTMLElement;
-      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable) {
+  async function handlePaste() {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (!text || text.trim().length < 10) {
+        toast("Nothing to paste");
         return;
       }
-
-      e.preventDefault();
       const transcript = importFromClipboardText(text);
       if (transcript) {
         onImport([transcript]);
-        setShowPasteToast(true);
-        setTimeout(() => setShowPasteToast(false), 3000);
+        toast("Transcript pasted and imported");
       }
-    },
-    [onImport]
-  );
+    } catch {
+      toast("Allow clipboard access to paste");
+    }
+  }
 
-  useEffect(() => {
-    document.addEventListener("paste", handlePaste);
-    return () => document.removeEventListener("paste", handlePaste);
-  }, [handlePaste]);
+  function toast(msg: string) {
+    setShowToast(msg);
+    setTimeout(() => setShowToast(null), 3000);
+  }
 
   return (
     <>
@@ -100,14 +96,23 @@ export default function ImportButton({ onImport }: ImportButtonProps) {
           )}
         </button>
 
-        {/* Paste hint */}
-        <span className="text-xs text-muted hidden sm:inline">or paste (Cmd+V)</span>
+        {/* Paste button */}
+        <button
+          onClick={handlePaste}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border border-border bg-surface text-foreground transition-all active:scale-95 hover:bg-gray-50"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
+            <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+          </svg>
+          Paste
+        </button>
       </div>
 
-      {/* Paste success toast */}
-      {showPasteToast && (
+      {/* Toast */}
+      {showToast && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-gray-900 text-white px-4 py-2 rounded-lg shadow-lg text-sm z-50">
-          Transcript pasted and imported
+          {showToast}
         </div>
       )}
     </>
