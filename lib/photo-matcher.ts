@@ -599,15 +599,26 @@ export async function batchMatchPhotos(
   let gpsFound = 0;
   let gpsTotal = 0;
 
-  for (const file of Array.from(files)) {
-    if (!file.type.startsWith("image/")) continue;
-    gpsTotal++;
-    fileTypes[file.type] = (fileTypes[file.type] || 0) + 1;
+  const imageFiles = Array.from(files).filter((f) => f.type.startsWith("image/"));
+  gpsTotal = imageFiles.length;
+  for (const f of imageFiles) {
+    fileTypes[f.type] = (fileTypes[f.type] || 0) + 1;
+  }
 
-    const meta = await getPhotoMetadata(file);
+  // Process all photos in parallel (EXIF + resize)
+  const processed = await Promise.all(
+    imageFiles.map(async (file) => {
+      const [meta, dataUrl] = await Promise.all([
+        getPhotoMetadata(file),
+        readFileAsDataUrl(file),
+      ]);
+      const resized = await resizeImage(dataUrl, 1200);
+      return { file, meta, resized };
+    }),
+  );
+
+  for (const { file, meta, resized } of processed) {
     if (meta.gps) gpsFound++;
-    const dataUrl = await readFileAsDataUrl(file);
-    const resized = await resizeImage(dataUrl, 1200);
 
     const attachment: Attachment = {
       id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,

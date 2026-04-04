@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 import { importParsedSegments, importFromText, addEvent } from "@/lib/event-store";
 import { srtToSegments, ParsedTranscript } from "@/lib/srt-parser";
 import { AppEvent, Attachment, Client } from "@/lib/types";
-import { batchMatchPhotos, PhotoMatchResult, PhotoSegment, GpsCoords, reverseGeocode, findClosestClient } from "@/lib/photo-matcher";
+import { batchMatchPhotos, PhotoMatchResult, PhotoSegment, GpsCoords, reverseGeocode, findClosestClient, findClientByAddress } from "@/lib/photo-matcher";
 import { saveAttachments as dbSaveAttachments } from "@/lib/attachment-store";
 
 interface ImportButtonProps {
@@ -73,7 +73,7 @@ export default function ImportButton({
     createdEvents: AppEvent[];
     segments: PhotoSegment[];
     totalFiles: number;
-    diagnostics: { fileTypes: Record<string, number>; gpsFound: number; gpsTotal: number; clientsWithCoords: number; clientsTotal: number; clientsGeocoded: number; matchDetails: { segmentLabel: string; closestClient: string | null; distanceMeters: number | null }[] };
+    diagnostics: { fileTypes: Record<string, number>; gpsFound: number; gpsTotal: number; clientsWithCoords: number; clientsTotal: number; matchDetails: { segmentLabel: string; closestClient: string | null; distanceMeters: number | null }[] };
   } | null>(null);
   const [pendingImageFiles, setPendingImageFiles] = useState<FileList | null>(null);
   const [fallbackLocation, setFallbackLocation] = useState<GpsCoords | null>(null);
@@ -115,22 +115,12 @@ export default function ImportButton({
     setPhotoError(null);
 
     try {
-      // Geocode any clients that have addresses but no coordinates
-      const { geocodeAllClients } = await import("@/lib/clients");
-      const geocoded = await geocodeAllClients();
-      // Reload clients if any were geocoded so we have fresh lat/lng
-      let activeClients = clients;
-      if (geocoded > 0) {
-        const { loadClients } = await import("@/lib/clients");
-        activeClients = loadClients();
-      }
-
       const result = await batchMatchPhotos(
         pendingImageFiles,
         photoMatchRecordings ? events : [],
         photoGapMinutes,
         photoBufferMinutes,
-        activeClients,
+        clients,
       );
 
       if (result.matched.length > 0) {
@@ -139,13 +129,19 @@ export default function ImportButton({
 
       // Apply fallback location to segments without GPS
       if (fallbackLocation) {
-        for (const seg of result.unmatchedSegments) {
-          if (!seg.gps) {
+        const noGpsSegments = result.unmatchedSegments.filter((s) => !s.gps);
+        if (noGpsSegments.length > 0) {
+          // Reverse-geocode once for the shared fallback location
+          let fallbackAddress: string | null = null;
+          try {
+            fallbackAddress = await reverseGeocode(fallbackLocation);
+          } catch { /* skip */ }
+          const fallbackClient = findClosestClient(fallbackLocation, clients)
+            || (fallbackAddress ? findClientByAddress(fallbackAddress, clients) : null);
+          for (const seg of noGpsSegments) {
             seg.gps = fallbackLocation;
-            try {
-              seg.address = await reverseGeocode(fallbackLocation);
-            } catch { /* skip */ }
-            seg.matchedClient = findClosestClient(fallbackLocation, clients);
+            seg.address = fallbackAddress;
+            seg.matchedClient = fallbackClient;
           }
         }
       }
@@ -184,7 +180,7 @@ export default function ImportButton({
         createdEvents: created,
         segments: result.unmatchedSegments,
         totalFiles: pendingImageFiles.length,
-        diagnostics: { ...result.diagnostics, clientsGeocoded: geocoded },
+        diagnostics: result.diagnostics,
       });
       setPhotoStep("results");
     } catch (err) {
@@ -660,7 +656,7 @@ export default function ImportButton({
               {photoStep === "processing" && (
                 <div className="flex flex-col items-center py-8 gap-3">
                   <div className="w-8 h-8 border-2 border-accent border-t-transparent rounded-full animate-spin" />
-                  <p className="text-xs text-muted">Reading EXIF data, geocoding locations...</p>
+                  <p className="text-xs text-muted">Reading EXIF data and matching locations...</p>
                 </div>
               )}
 
@@ -693,15 +689,17 @@ export default function ImportButton({
                       GPS extracted: {photoResults.diagnostics.gpsFound} of {photoResults.diagnostics.gpsTotal} photos
                     </p>
                     <p className="text-[10px] text-gray-500">
-                      Clients geocoded this run: {photoResults.diagnostics.clientsGeocoded} | Total with coords: {photoResults.diagnostics.clientsWithCoords} of {photoResults.diagnostics.clientsTotal}
+                      Clients with coords: {photoResults.diagnostics.clientsWithCoords} of {photoResults.diagnostics.clientsTotal} | Address text matching: enabled
                     </p>
                     {photoResults.diagnostics.matchDetails.length > 0 && (
                       <div className="mt-1 space-y-0.5">
                         {photoResults.diagnostics.matchDetails.map((md, i) => (
                           <p key={i} className="text-[10px] text-gray-500">
                             {md.segmentLabel}: {md.closestClient
-                              ? `nearest client "${md.closestClient}" at ${md.distanceMeters}m${md.distanceMeters! <= 2000 ? " (matched)" : " (>2km, not matched)"}`
-                              : "no geocoded clients to compare"}
+                              ? md.distanceMeters != null
+                                ? `nearest client "${md.closestClient}" at ${md.distanceMeters}m${md.distanceMeters <= 2000 ? " (matched)" : " (>2km, not matched)"}`
+                                : `matched "${md.closestClient}"`
+                              : "no client match"}
                           </p>
                         ))}
                       </div>
