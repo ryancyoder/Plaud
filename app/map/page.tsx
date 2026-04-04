@@ -8,6 +8,7 @@ import { loadClients, updateClient } from "@/lib/clients";
 import { forwardGeocode } from "@/lib/photo-matcher";
 import { getLastName } from "@/lib/utils";
 import { STATUS_PIN_COLORS, DEFAULT_PIN_COLOR } from "@/lib/map-utils";
+import { getPersistedClientId, setPersistedClientId } from "@/lib/selected-client";
 import MapSearchOverlay from "@/components/MapSearchOverlay";
 
 const MapView = dynamic(() => import("@/components/MapView"), { ssr: false });
@@ -16,7 +17,11 @@ type SortMode = "alpha" | "status";
 
 export default function MapPage() {
   const [clients, setClients] = useState<Client[]>([]);
-  const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
+  const [selectedClientId, setSelectedClientIdRaw] = useState<string | null>(null);
+  const setSelectedClientId = useCallback((id: string | null) => {
+    setSelectedClientIdRaw(id);
+    setPersistedClientId(id);
+  }, []);
   const [placingClientId, setPlacingClientId] = useState<string | null>(null);
   const [activeStatuses, setActiveStatuses] = useState<Set<ClientStatus>>(
     new Set(CLIENT_STATUSES.map((s) => s.key)),
@@ -30,6 +35,9 @@ export default function MapPage() {
 
   useEffect(() => {
     setClients(loadClients());
+    // Restore persisted client selection
+    const persistedId = getPersistedClientId();
+    if (persistedId) setSelectedClientIdRaw(persistedId);
     setMounted(true);
   }, []);
 
@@ -116,7 +124,11 @@ export default function MapPage() {
   const handleSelectClient = useCallback((id: string | null) => {
     // Don't cancel placing mode on regular client clicks
     if (!placingClientId) {
-      setSelectedClientId((prev) => (prev === id ? null : id));
+      setSelectedClientIdRaw((prev) => {
+        const next = prev === id ? null : id;
+        setPersistedClientId(next);
+        return next;
+      });
     }
   }, [placingClientId]);
 

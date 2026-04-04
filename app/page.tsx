@@ -17,6 +17,7 @@ import {
 import { PhotoMatchResult } from "@/lib/photo-matcher";
 import { hasApiKey, processSegmentWithAI } from "@/lib/claude-api";
 import { isToday } from "@/lib/utils";
+import { getPersistedClientId, setPersistedClientId } from "@/lib/selected-client";
 import EventListPanel from "@/components/EventListPanel";
 import ViewerPanel from "@/components/ViewerPanel";
 import ClientRoster from "@/components/ClientRoster";
@@ -90,6 +91,20 @@ export default function Dashboard() {
       });
   }, []);
 
+  // Restore persisted client selection from another view
+  useEffect(() => {
+    if (clients.length === 0) return;
+    if (selectedClient) return; // already selected
+    const persistedId = getPersistedClientId();
+    if (persistedId) {
+      const match = clients.find((c) => c.id === persistedId);
+      if (match) {
+        setSelectedClient(match);
+        setSidebarTab("contacts");
+      }
+    }
+  }, [clients, selectedClient]);
+
   const currentWeek = getWeekDates(weekOffset);
 
   // Keep week header in sync with selected date
@@ -144,6 +159,7 @@ export default function Dashboard() {
   const handleSelectClient = useCallback((client: Client | null) => {
     setSelectedClient(client);
     setSelectedEventId(null);
+    setPersistedClientId(client?.id ?? null);
   }, []);
 
   // Clear drill-down when switching sidebar tabs

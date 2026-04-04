@@ -7,11 +7,19 @@ import { loadEvents, getEventsForClient, addEvent, deleteEvent, deleteEventsForC
 import { parseRfpClipboard, rfpToClientData } from "@/lib/rfp-parser";
 import { formatDuration, getLastName } from "@/lib/utils";
 import Link from "next/link";
+import { getPersistedClientId, setPersistedClientId } from "@/lib/selected-client";
 
 export default function BoardPage() {
   const [clients, setClients] = useState<Client[]>([]);
   const [events, setEvents] = useState<AppEvent[]>([]);
-  const [selectedClient, setSelectedClient] = useState<Client | null>(null);
+  const [selectedClient, setSelectedClientRaw] = useState<Client | null>(null);
+  const setSelectedClient = useCallback((client: Client | null | ((prev: Client | null) => Client | null)) => {
+    setSelectedClientRaw((prev) => {
+      const next = typeof client === "function" ? client(prev) : client;
+      setPersistedClientId(next?.id ?? null);
+      return next;
+    });
+  }, []);
   const [mounted, setMounted] = useState(false);
   const [importToast, setImportToast] = useState<string | null>(null);
 
@@ -27,8 +35,15 @@ export default function BoardPage() {
   const columnRefs = useRef<Map<ClientStatus, HTMLDivElement>>(new Map());
 
   useEffect(() => {
-    setClients(loadClients());
+    const loaded = loadClients();
+    setClients(loaded);
     setEvents(loadEvents());
+    // Restore persisted client selection
+    const persistedId = getPersistedClientId();
+    if (persistedId) {
+      const match = loaded.find((c) => c.id === persistedId);
+      if (match) setSelectedClient(match);
+    }
     setMounted(true);
   }, []);
 
