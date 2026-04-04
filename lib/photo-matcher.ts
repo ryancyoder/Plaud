@@ -379,6 +379,77 @@ export function findClosestClient(
 }
 
 /**
+ * Normalize an address string for fuzzy comparison.
+ * Strips punctuation, lowercases, collapses whitespace, expands common abbreviations.
+ */
+function normalizeAddress(addr: string): string {
+  let s = addr.toLowerCase().trim();
+  // Expand common abbreviations
+  const abbrevs: [RegExp, string][] = [
+    [/\bst\b/g, "street"],
+    [/\bave?\b/g, "avenue"],
+    [/\bblvd\b/g, "boulevard"],
+    [/\bdr\b/g, "drive"],
+    [/\bln\b/g, "lane"],
+    [/\brd\b/g, "road"],
+    [/\bct\b/g, "court"],
+    [/\bpl\b/g, "place"],
+    [/\bpkwy\b/g, "parkway"],
+    [/\bcir\b/g, "circle"],
+    [/\bn\b/g, "north"],
+    [/\bs\b/g, "south"],
+    [/\be\b/g, "east"],
+    [/\bw\b/g, "west"],
+  ];
+  for (const [pat, rep] of abbrevs) {
+    s = s.replace(pat, rep);
+  }
+  // Remove punctuation, collapse whitespace
+  s = s.replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, " ").trim();
+  return s;
+}
+
+/**
+ * Compute similarity between two strings as a 0-1 score.
+ * Uses token overlap (Jaccard-like) for address matching.
+ */
+function addressSimilarity(a: string, b: string): number {
+  const tokensA = new Set(normalizeAddress(a).split(" "));
+  const tokensB = new Set(normalizeAddress(b).split(" "));
+  if (tokensA.size === 0 || tokensB.size === 0) return 0;
+  let intersection = 0;
+  for (const t of tokensA) {
+    if (tokensB.has(t)) intersection++;
+  }
+  // Use size of smaller set as denominator — if all tokens of the
+  // shorter address appear in the longer one, that's a strong match.
+  const minSize = Math.min(tokensA.size, tokensB.size);
+  return intersection / minSize;
+}
+
+/**
+ * Match a reverse-geocoded photo address to a client's address using text similarity.
+ * Returns the best-matching client if similarity exceeds threshold.
+ */
+export function findClientByAddress(
+  photoAddress: string,
+  clients: Client[],
+  threshold = 0.5,
+): Client | null {
+  let best: Client | null = null;
+  let bestScore = 0;
+  for (const c of clients) {
+    if (!c.address) continue;
+    const score = addressSimilarity(photoAddress, c.address);
+    if (score > bestScore && score >= threshold) {
+      bestScore = score;
+      best = c;
+    }
+  }
+  return best;
+}
+
+/**
  * Match a photo's timestamp to the recording event whose window it falls within.
  */
 export function matchPhotoToEvent(
@@ -577,7 +648,14 @@ export async function batchMatchPhotos(
       } catch {
         // skip
       }
+
+      // Strategy 1: GPS coordinate matching (if clients have coordinates)
       seg.matchedClient = findClosestClient(seg.gps, clients);
+
+      // Strategy 2: Text-based address matching (fallback when clients lack coordinates)
+      if (!seg.matchedClient && seg.address) {
+        seg.matchedClient = findClientByAddress(seg.address, clients);
+      }
 
       // Find closest client regardless of threshold for diagnostics
       let closestName: string | null = null;
@@ -589,6 +667,10 @@ export async function batchMatchPhotos(
           closestDist = d;
           closestName = c.name;
         }
+      }
+      // If matched by address text, note it in diagnostics
+      if (!closestName && seg.matchedClient) {
+        closestName = seg.matchedClient.name + " (address match)";
       }
       matchDetails.push({
         segmentLabel: seg.address || `${seg.gps.lat.toFixed(4)}, ${seg.gps.lng.toFixed(4)}`,
