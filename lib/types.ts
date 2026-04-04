@@ -104,6 +104,8 @@ export interface Client {
   phone?: string;
   email?: string;
   address?: string;
+  lat?: number;
+  lng?: number;
   notes?: string;
   appointmentDate?: string;
 }

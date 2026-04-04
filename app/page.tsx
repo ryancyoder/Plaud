@@ -22,7 +22,6 @@ import ViewerPanel from "@/components/ViewerPanel";
 import ClientRoster from "@/components/ClientRoster";
 import WeekNav from "@/components/WeekNav";
 import ImportButton from "@/components/ImportButton";
-import BatchPhotoImport from "@/components/BatchPhotoImport";
 import SettingsModal from "@/components/SettingsModal";
 
 type SidebarTab = "calendar" | "contacts";
@@ -349,8 +348,7 @@ export default function Dashboard() {
               <circle cx="12" cy="12" r="3" />
             </svg>
           </button>
-          <ImportButton onImport={handleImport} />
-          <BatchPhotoImport events={events} clients={clients} onPhotosMatched={handleBatchPhotos} onEventsCreated={(created) => setEvents((prev) => [...prev, ...created])} />
+          <ImportButton onImport={handleImport} events={events} clients={clients} onPhotosMatched={handleBatchPhotos} onPhotoEventsCreated={(created) => setEvents((prev) => [...prev, ...created])} />
           {events.length > 0 && (
             <button
               onClick={handleClearData}

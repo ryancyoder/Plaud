@@ -1,15 +1,28 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { importParsedSegments, importFromText } from "@/lib/event-store";
+import { importParsedSegments, importFromText, addEvent } from "@/lib/event-store";
 import { srtToSegments, ParsedTranscript } from "@/lib/srt-parser";
-import { AppEvent } from "@/lib/types";
+import { AppEvent, Attachment, Client } from "@/lib/types";
+import { batchMatchPhotos, PhotoMatchResult } from "@/lib/photo-matcher";
+import { saveAttachments as dbSaveAttachments } from "@/lib/attachment-store";
 
 interface ImportButtonProps {
   onImport: (events: AppEvent[]) => void;
+  // Photo import props
+  events?: AppEvent[];
+  clients?: Client[];
+  onPhotosMatched?: (results: PhotoMatchResult[]) => void;
+  onPhotoEventsCreated?: (events: AppEvent[]) => void;
 }
 
-export default function ImportButton({ onImport }: ImportButtonProps) {
+export default function ImportButton({
+  onImport,
+  events = [],
+  clients = [],
+  onPhotosMatched,
+  onPhotoEventsCreated,
+}: ImportButtonProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pasteRef = useRef<HTMLTextAreaElement>(null);
   const [importing, setImporting] = useState(false);
@@ -48,6 +61,20 @@ export default function ImportButton({ onImport }: ImportButtonProps) {
   const [pasteStartDate, setPasteStartDate] = useState("");
   const [pasteStartTime, setPasteStartTime] = useState("");
 
+  // Photo import state
+  type PhotoStep = "closed" | "config" | "processing" | "results";
+  const [photoStep, setPhotoStep] = useState<PhotoStep>("closed");
+  const [photoGapMinutes, setPhotoGapMinutes] = useState(30);
+  const [photoMatchRecordings, setPhotoMatchRecordings] = useState(true);
+  const [photoBufferMinutes, setPhotoBufferMinutes] = useState(15);
+  const [photoError, setPhotoError] = useState<string | null>(null);
+  const [photoResults, setPhotoResults] = useState<{
+    matched: PhotoMatchResult[];
+    createdEvents: AppEvent[];
+    totalFiles: number;
+  } | null>(null);
+  const [pendingImageFiles, setPendingImageFiles] = useState<FileList | null>(null);
+
   function todayStr() {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -62,15 +89,88 @@ export default function ImportButton({ onImport }: ImportButtonProps) {
     if (!files || files.length === 0) return;
 
     const hasSrt = Array.from(files).some((f) => f.name.toLowerCase().endsWith(".srt"));
+    const hasImages = Array.from(files).some((f) => f.type.startsWith("image/"));
+
     if (hasSrt) {
       setPendingFiles(files);
       setStartDate(todayStr());
       setStartTime("09:00");
       setShowStartPrompt(true);
+    } else if (hasImages) {
+      setPendingImageFiles(files);
+      setPhotoStep("config");
     } else {
-      toast("Only .srt files are supported for file import");
+      toast("Supported: .srt transcript files or image files");
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
+  }
+
+  async function processPhotos() {
+    if (!pendingImageFiles) return;
+    setPhotoStep("processing");
+    setPhotoError(null);
+
+    try {
+      const result = await batchMatchPhotos(
+        pendingImageFiles,
+        photoMatchRecordings ? events : [],
+        photoGapMinutes,
+        photoBufferMinutes,
+        clients,
+      );
+
+      if (result.matched.length > 0) {
+        onPhotosMatched?.(result.matched);
+      }
+
+      const created: AppEvent[] = [];
+      for (const seg of result.unmatchedSegments) {
+        const timeStr = seg.startTime.toLocaleTimeString("en-US", {
+          hour: "numeric",
+          minute: "2-digit",
+        });
+        const count = seg.attachments.length;
+        const locationLabel = seg.address || timeStr;
+        const label = `${count} Photo${count !== 1 ? "s" : ""} — ${locationLabel}`;
+
+        const strippedAtts: Attachment[] = seg.attachments.map(({ dataUrl, ...rest }) => ({ ...rest, dataUrl: "" }));
+
+        const newEvent = addEvent({
+          type: "photo",
+          date: seg.date,
+          startTime: `${String(seg.startTime.getHours()).padStart(2, "0")}:${String(seg.startTime.getMinutes()).padStart(2, "0")}`,
+          label,
+          attachments: strippedAtts,
+          ...(seg.matchedClient ? { clientId: seg.matchedClient.id } : {}),
+        });
+
+        await dbSaveAttachments(newEvent.id, seg.attachments);
+        created.push({ ...newEvent, attachments: seg.attachments });
+      }
+
+      if (created.length > 0) {
+        onPhotoEventsCreated?.(created);
+      }
+
+      setPhotoResults({
+        matched: result.matched,
+        createdEvents: created,
+        totalFiles: pendingImageFiles.length,
+      });
+      setPhotoStep("results");
+    } catch (err) {
+      console.error("Photo import error:", err);
+      setPhotoError(err instanceof Error ? err.message : String(err));
+      setPhotoStep("config");
+    }
+  }
+
+  function closePhotoModal() {
+    setPhotoStep("closed");
+    setPhotoError(null);
+    setPhotoResults(null);
+    setPendingImageFiles(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
   async function confirmStartTime() {
@@ -400,6 +500,194 @@ export default function ImportButton({ onImport }: ImportButtonProps) {
             setPendingRecordingStart(null);
           }}
         />
+      )}
+
+      {/* Photo Import Modal */}
+      {photoStep !== "closed" && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={closePhotoModal}>
+          <div
+            className="bg-white rounded-xl shadow-xl max-w-md w-full mx-4 max-h-[80vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+              <h2 className="text-sm font-bold">
+                {photoStep === "config" && "Import Photos"}
+                {photoStep === "processing" && "Processing..."}
+                {photoStep === "results" && "Import Results"}
+              </h2>
+              <button onClick={closePhotoModal} className="p-1 text-muted hover:text-foreground rounded-lg hover:bg-gray-100">
+                <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M5 5l10 10M15 5L5 15" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {photoStep === "config" && (
+                <>
+                  {photoError && (
+                    <div className="rounded-lg bg-red-50 border border-red-200 p-3">
+                      <p className="text-xs font-semibold text-red-700 mb-1">Import Error</p>
+                      <p className="text-[10px] text-red-600 break-words">{photoError}</p>
+                    </div>
+                  )}
+                  <p className="text-xs text-muted">
+                    {pendingImageFiles ? `${pendingImageFiles.length} photo${pendingImageFiles.length !== 1 ? "s" : ""} selected` : "Configure photo import settings"}
+                  </p>
+
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-semibold uppercase text-muted">Time gap between events</label>
+                    <p className="text-[10px] text-gray-400">Photos separated by more than this gap are split into separate events</p>
+                    <div className="flex items-center gap-2">
+                      <input type="range" min={5} max={120} step={5} value={photoGapMinutes} onChange={(e) => setPhotoGapMinutes(Number(e.target.value))} className="flex-1 h-1.5 accent-accent" />
+                      <span className="text-xs font-medium w-16 text-right">{photoGapMinutes} min</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between py-1">
+                    <div>
+                      <p className="text-xs font-medium">Match to recordings</p>
+                      <p className="text-[10px] text-gray-400">Auto-attach photos taken during a recording</p>
+                    </div>
+                    <button
+                      onClick={() => setPhotoMatchRecordings(!photoMatchRecordings)}
+                      className={`relative w-10 h-5.5 rounded-full transition-colors ${photoMatchRecordings ? "bg-accent" : "bg-gray-300"}`}
+                    >
+                      <div className={`absolute top-0.5 w-4.5 h-4.5 bg-white rounded-full shadow transition-transform ${photoMatchRecordings ? "translate-x-5" : "translate-x-0.5"}`} />
+                    </button>
+                  </div>
+
+                  {photoMatchRecordings && (
+                    <div className="space-y-1.5 pl-2 border-l-2 border-accent/20">
+                      <label className="text-[10px] font-semibold uppercase text-muted">Recording match buffer</label>
+                      <p className="text-[10px] text-gray-400">How far before/after a recording to match photos</p>
+                      <div className="flex items-center gap-2">
+                        <input type="range" min={0} max={60} step={5} value={photoBufferMinutes} onChange={(e) => setPhotoBufferMinutes(Number(e.target.value))} className="flex-1 h-1.5 accent-accent" />
+                        <span className="text-xs font-medium w-16 text-right">{photoBufferMinutes} min</span>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="rounded-lg bg-gray-50 border border-gray-200 p-3">
+                    <p className="text-[10px] text-muted">
+                      <strong>GPS location</strong> will be extracted from photo metadata to name events by address and auto-assign to clients with matching locations.
+                    </p>
+                  </div>
+                </>
+              )}
+
+              {photoStep === "processing" && (
+                <div className="flex flex-col items-center py-8 gap-3">
+                  <div className="w-8 h-8 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+                  <p className="text-xs text-muted">Reading EXIF data, geocoding locations...</p>
+                </div>
+              )}
+
+              {photoStep === "results" && photoResults && (
+                <>
+                  <div className="flex gap-3">
+                    <div className="flex-1 rounded-lg bg-gray-50 border border-gray-200 p-3 text-center">
+                      <div className="text-lg font-bold text-gray-700">{photoResults.totalFiles}</div>
+                      <div className="text-[10px] text-gray-500 font-medium uppercase">Selected</div>
+                    </div>
+                    <div className="flex-1 rounded-lg bg-green-50 border border-green-200 p-3 text-center">
+                      <div className="text-lg font-bold text-green-700">
+                        {photoResults.matched.reduce((n, r) => n + r.attachments.length, 0)}
+                      </div>
+                      <div className="text-[10px] text-green-600 font-medium uppercase">Matched</div>
+                    </div>
+                    <div className="flex-1 rounded-lg bg-blue-50 border border-blue-200 p-3 text-center">
+                      <div className="text-lg font-bold text-blue-700">{photoResults.createdEvents.length}</div>
+                      <div className="text-[10px] text-blue-600 font-medium uppercase">New Events</div>
+                    </div>
+                  </div>
+
+                  {photoResults.matched.length > 0 && (
+                    <div>
+                      <h3 className="text-[10px] font-semibold uppercase text-muted mb-2">Matched to Recordings</h3>
+                      <div className="space-y-2">
+                        {photoResults.matched.map((r) => (
+                          <div key={r.eventId} className="rounded-lg border border-border p-2.5">
+                            <div className="flex items-center justify-between mb-1.5">
+                              <span className="text-xs font-semibold">{r.eventTitle}</span>
+                              <span className="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full">
+                                {r.attachments.length} photo{r.attachments.length !== 1 ? "s" : ""}
+                              </span>
+                            </div>
+                            <div className="flex gap-1.5 overflow-x-auto">
+                              {r.attachments.map((att) => (
+                                <div key={att.id} className="shrink-0 w-12 h-12 rounded overflow-hidden border border-gray-200">
+                                  <img src={att.dataUrl} alt={att.name} className="w-full h-full object-cover" />
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {photoResults.createdEvents.length > 0 && (
+                    <div>
+                      <h3 className="text-[10px] font-semibold uppercase text-muted mb-2">Photo Events Created</h3>
+                      <p className="text-[10px] text-gray-400 mb-2">Grouped by time and location, added to calendar</p>
+                      <div className="space-y-2">
+                        {photoResults.createdEvents.map((ev) => {
+                          const assignedClient = ev.clientId ? clients.find((c) => c.id === ev.clientId) : null;
+                          return (
+                            <div key={ev.id} className="rounded-lg border border-blue-200 bg-blue-50 p-2.5">
+                              <div className="flex items-center justify-between mb-1">
+                                <span className="text-xs font-semibold text-blue-800">{ev.label}</span>
+                                <span className="text-[10px] text-blue-600">{ev.date}</span>
+                              </div>
+                              {assignedClient && (
+                                <div className="mb-1.5">
+                                  <span className="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full">
+                                    Assigned to {assignedClient.name}
+                                  </span>
+                                </div>
+                              )}
+                              <div className="flex gap-1.5 overflow-x-auto">
+                                {ev.attachments?.map((att) => (
+                                  <div key={att.id} className="shrink-0 w-12 h-12 rounded overflow-hidden border border-blue-200">
+                                    <img src={att.dataUrl} alt={att.name} className="w-full h-full object-cover" />
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {photoResults.matched.length === 0 && photoResults.createdEvents.length === 0 && (
+                    <div className="text-center text-xs text-gray-400 py-6">No image files found</div>
+                  )}
+                </>
+              )}
+            </div>
+
+            <div className="px-4 py-3 border-t border-border">
+              {photoStep === "config" && (
+                <button
+                  onClick={processPhotos}
+                  className="w-full py-2.5 rounded-lg bg-accent text-white text-xs font-semibold hover:bg-blue-600 active:scale-[0.98]"
+                >
+                  Import {pendingImageFiles?.length || 0} Photo{(pendingImageFiles?.length || 0) !== 1 ? "s" : ""}
+                </button>
+              )}
+              {photoStep === "results" && (
+                <button
+                  onClick={closePhotoModal}
+                  className="w-full py-2.5 rounded-lg bg-accent text-white text-xs font-semibold hover:bg-blue-600 active:scale-[0.98]"
+                >
+                  Done
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Toast */}

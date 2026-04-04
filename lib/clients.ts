@@ -56,3 +56,45 @@ export function updateClient(id: string, updates: Partial<Omit<Client, "id">>): 
     saveClients(clients);
   }
 }
+
+/**
+ * Geocode a client's address to lat/lng if they have an address but no coordinates.
+ * Call this after updating a client's address.
+ */
+export async function geocodeClientAddress(id: string): Promise<void> {
+  const { forwardGeocode } = await import("./photo-matcher");
+  const clients = loadClients();
+  const client = clients.find((c) => c.id === id);
+  if (!client || !client.address) return;
+  // Skip if already geocoded and address hasn't changed
+  if (client.lat != null && client.lng != null) return;
+  const coords = await forwardGeocode(client.address);
+  if (coords) {
+    client.lat = coords.lat;
+    client.lng = coords.lng;
+    saveClients(clients);
+  }
+}
+
+/**
+ * Geocode all clients that have addresses but no coordinates.
+ */
+export async function geocodeAllClients(): Promise<number> {
+  const { forwardGeocode } = await import("./photo-matcher");
+  const clients = loadClients();
+  let updated = 0;
+  for (const client of clients) {
+    if (client.address && (client.lat == null || client.lng == null)) {
+      const coords = await forwardGeocode(client.address);
+      if (coords) {
+        client.lat = coords.lat;
+        client.lng = coords.lng;
+        updated++;
+      }
+      // Rate limit: Nominatim asks for 1 req/sec
+      await new Promise((r) => setTimeout(r, 1100));
+    }
+  }
+  if (updated > 0) saveClients(clients);
+  return updated;
+}

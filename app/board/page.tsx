@@ -349,15 +349,24 @@ function ClientViewer({ client, events, onDelete, onUpdate }: {
   }, [client.id, client.name, client.company, client.phone, client.email, client.address, client.notes]);
 
   function handleSave() {
+    const addressChanged = (form.address.trim() || "") !== (client.address || "");
     onUpdate(client.id, {
       name: form.name.trim(),
       company: form.company.trim() || undefined,
       phone: form.phone.trim() || undefined,
       email: form.email.trim() || undefined,
       address: form.address.trim() || undefined,
+      // Clear lat/lng if address changed so it gets re-geocoded
+      ...(addressChanged ? { lat: undefined, lng: undefined } : {}),
       notes: form.notes.trim() || undefined,
     });
     setEditing(false);
+    // Geocode the new address in the background
+    if (addressChanged && form.address.trim()) {
+      import("@/lib/clients").then(({ geocodeClientAddress }) => {
+        geocodeClientAddress(client.id);
+      });
+    }
   }
 
   const fieldClass = "w-full px-2 py-1.5 border border-border rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-accent";
