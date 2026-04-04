@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Client, ClientStatus, CLIENT_STATUSES, Transcript } from "@/lib/types";
-import { loadClients, saveClients, updateClientStatus, deleteClient } from "@/lib/clients";
+import { loadClients, saveClients, updateClientStatus, deleteClient, updateClient } from "@/lib/clients";
 import { loadTranscripts } from "@/lib/store";
 import { getTranscriptsForClient } from "@/lib/clients";
 import { parseRfpClipboard, rfpToClientData } from "@/lib/rfp-parser";
@@ -285,6 +285,12 @@ export default function BoardPage() {
               setClients((prev) => prev.filter((c) => c.id !== id));
               setSelectedClient(null);
             }}
+            onUpdate={(id, updates) => {
+              updateClient(id, updates);
+              const updated = { ...selectedClient, ...updates };
+              setSelectedClient(updated);
+              setClients((prev) => prev.map((c) => c.id === id ? updated : c));
+            }}
           />
         ) : (
           <div className="flex items-center justify-center h-full text-sm text-gray-300">
@@ -305,17 +311,58 @@ export default function BoardPage() {
 
 // --- Client Viewer ---
 
-function ClientViewer({ client, transcripts, onDelete }: { client: Client; transcripts: Transcript[]; onDelete: (id: string) => void }) {
+function ClientViewer({ client, transcripts, onDelete, onUpdate }: {
+  client: Client;
+  transcripts: Transcript[];
+  onDelete: (id: string) => void;
+  onUpdate: (id: string, updates: Partial<Client>) => void;
+}) {
   const sorted = [...transcripts].sort((a, b) => b.date.localeCompare(a.date) || b.startTime.localeCompare(a.startTime));
-  const totalDuration = transcripts.reduce((s, t) => s + t.duration, 0);
   const statusInfo = CLIENT_STATUSES.find((s) => s.key === (client.status || "lead"));
+
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState({
+    name: client.name,
+    company: client.company || "",
+    phone: client.phone || "",
+    email: client.email || "",
+    address: client.address || "",
+    notes: client.notes || "",
+  });
+
+  // Reset form when client changes
+  useEffect(() => {
+    setForm({
+      name: client.name,
+      company: client.company || "",
+      phone: client.phone || "",
+      email: client.email || "",
+      address: client.address || "",
+      notes: client.notes || "",
+    });
+    setEditing(false);
+  }, [client.id, client.name, client.company, client.phone, client.email, client.address, client.notes]);
+
+  function handleSave() {
+    onUpdate(client.id, {
+      name: form.name.trim(),
+      company: form.company.trim() || undefined,
+      phone: form.phone.trim() || undefined,
+      email: form.email.trim() || undefined,
+      address: form.address.trim() || undefined,
+      notes: form.notes.trim() || undefined,
+    });
+    setEditing(false);
+  }
+
+  const fieldClass = "w-full px-2 py-1.5 border border-border rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-accent";
 
   return (
     <div className="flex h-full overflow-hidden">
       {/* Client info sidebar */}
       <div className="w-64 shrink-0 border-r border-border p-4 overflow-y-auto">
         <div className="flex items-center gap-3 mb-4">
-          <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold ${
+          <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${
             client.type === "client" ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-600"
           }`}>
             {client.name.charAt(0).toUpperCase()}
@@ -324,76 +371,145 @@ function ClientViewer({ client, transcripts, onDelete }: { client: Client; trans
             <h2 className="text-sm font-bold">{client.name}</h2>
             {client.company && <p className="text-[10px] text-muted">{client.company}</p>}
           </div>
-          <button
-            onClick={() => {
-              if (window.confirm(`Delete "${client.name}"?`)) onDelete(client.id);
-            }}
-            className="p-1.5 text-gray-300 hover:text-red-500 rounded-lg hover:bg-red-50 shrink-0"
-            title="Delete client"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="3 6 5 6 21 6" />
-              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-              <path d="M10 11v6" />
-              <path d="M14 11v6" />
-              <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
-            </svg>
-          </button>
+          <div className="flex items-center gap-0.5 shrink-0">
+            <button
+              onClick={() => {
+                if (editing) {
+                  // Cancel
+                  setForm({
+                    name: client.name,
+                    company: client.company || "",
+                    phone: client.phone || "",
+                    email: client.email || "",
+                    address: client.address || "",
+                    notes: client.notes || "",
+                  });
+                  setEditing(false);
+                } else {
+                  setEditing(true);
+                }
+              }}
+              className={`p-1.5 rounded-lg shrink-0 ${editing ? "text-muted hover:text-foreground hover:bg-gray-100" : "text-gray-300 hover:text-accent hover:bg-blue-50"}`}
+              title={editing ? "Cancel editing" : "Edit client"}
+            >
+              {editing ? (
+                <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M5 5l10 10M15 5L5 15" />
+                </svg>
+              ) : (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+                  <path d="m15 5 4 4" />
+                </svg>
+              )}
+            </button>
+            <button
+              onClick={() => {
+                if (window.confirm(`Delete "${client.name}"?`)) onDelete(client.id);
+              }}
+              className="p-1.5 text-gray-300 hover:text-red-500 rounded-lg hover:bg-red-50 shrink-0"
+              title="Delete client"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="3 6 5 6 21 6" />
+                <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                <path d="M10 11v6" />
+                <path d="M14 11v6" />
+                <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+              </svg>
+            </button>
+          </div>
         </div>
 
-        <div className="space-y-3">
-          <div>
-            <span className="text-[10px] font-semibold uppercase text-muted">Status</span>
-            <div className={`mt-1 inline-block text-[10px] font-medium px-2 py-0.5 rounded-full border ${statusInfo?.color || ""}`}>
-              {statusInfo?.label || "Lead"}
+        {editing ? (
+          <div className="space-y-2.5">
+            <div>
+              <span className="text-[10px] font-semibold uppercase text-muted">Name</span>
+              <input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} className={fieldClass} />
             </div>
-          </div>
-
-          {client.phone && (
+            <div>
+              <span className="text-[10px] font-semibold uppercase text-muted">Company</span>
+              <input value={form.company} onChange={(e) => setForm((f) => ({ ...f, company: e.target.value }))} className={fieldClass} placeholder="Optional" />
+            </div>
             <div>
               <span className="text-[10px] font-semibold uppercase text-muted">Phone</span>
-              <p className="text-xs mt-0.5">{client.phone}</p>
+              <input value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} className={fieldClass} placeholder="555-555-5555" />
             </div>
-          )}
-
-          {client.email && (
             <div>
               <span className="text-[10px] font-semibold uppercase text-muted">Email</span>
-              <p className="text-xs mt-0.5 break-all">{client.email}</p>
+              <input value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} className={fieldClass} placeholder="email@example.com" />
             </div>
-          )}
-
-          {client.address && (
             <div>
               <span className="text-[10px] font-semibold uppercase text-muted">Address</span>
-              <p className="text-xs mt-0.5">{client.address}</p>
+              <input value={form.address} onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))} className={fieldClass} placeholder="123 Main St, City, State" />
             </div>
-          )}
-
-          {client.appointmentDate && (
-            <div>
-              <span className="text-[10px] font-semibold uppercase text-muted">Appointment</span>
-              <p className="text-xs mt-0.5">
-                {(() => {
-                  try {
-                    const d = new Date(client.appointmentDate);
-                    return isNaN(d.getTime()) ? client.appointmentDate : d.toLocaleString("en-US", {
-                      weekday: "short", month: "short", day: "numeric", year: "numeric",
-                      hour: "numeric", minute: "2-digit",
-                    });
-                  } catch { return client.appointmentDate; }
-                })()}
-              </p>
-            </div>
-          )}
-
-          {client.notes && (
             <div>
               <span className="text-[10px] font-semibold uppercase text-muted">Notes</span>
-              <p className="text-xs mt-0.5 leading-relaxed whitespace-pre-wrap text-gray-700">{client.notes}</p>
+              <textarea value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} rows={4} className={`${fieldClass} resize-y`} />
             </div>
-          )}
-        </div>
+            <button
+              onClick={handleSave}
+              disabled={!form.name.trim()}
+              className="w-full px-3 py-2 rounded-lg text-xs font-medium bg-accent text-white hover:bg-blue-600 active:scale-[0.98] disabled:opacity-40"
+            >
+              Save Changes
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <div>
+              <span className="text-[10px] font-semibold uppercase text-muted">Status</span>
+              <div className={`mt-1 inline-block text-[10px] font-medium px-2 py-0.5 rounded-full border ${statusInfo?.color || ""}`}>
+                {statusInfo?.label || "Lead"}
+              </div>
+            </div>
+
+            {client.phone && (
+              <div>
+                <span className="text-[10px] font-semibold uppercase text-muted">Phone</span>
+                <p className="text-xs mt-0.5">{client.phone}</p>
+              </div>
+            )}
+
+            {client.email && (
+              <div>
+                <span className="text-[10px] font-semibold uppercase text-muted">Email</span>
+                <p className="text-xs mt-0.5 break-all">{client.email}</p>
+              </div>
+            )}
+
+            {client.address && (
+              <div>
+                <span className="text-[10px] font-semibold uppercase text-muted">Address</span>
+                <p className="text-xs mt-0.5">{client.address}</p>
+              </div>
+            )}
+
+            {client.appointmentDate && (
+              <div>
+                <span className="text-[10px] font-semibold uppercase text-muted">Appointment</span>
+                <p className="text-xs mt-0.5">
+                  {(() => {
+                    try {
+                      const d = new Date(client.appointmentDate);
+                      return isNaN(d.getTime()) ? client.appointmentDate : d.toLocaleString("en-US", {
+                        weekday: "short", month: "short", day: "numeric", year: "numeric",
+                        hour: "numeric", minute: "2-digit",
+                      });
+                    } catch { return client.appointmentDate; }
+                  })()}
+                </p>
+              </div>
+            )}
+
+            {client.notes && (
+              <div>
+                <span className="text-[10px] font-semibold uppercase text-muted">Notes</span>
+                <p className="text-xs mt-0.5 leading-relaxed whitespace-pre-wrap text-gray-700">{client.notes}</p>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Transcript list */}

@@ -49,7 +49,7 @@ export function updateClientStatus(id: string, status: ClientStatus): void {
   }
 }
 
-export function updateClient(id: string, updates: Partial<Pick<Client, "name" | "company" | "type">>): void {
+export function updateClient(id: string, updates: Partial<Omit<Client, "id">>): void {
   const clients = loadClients();
   const client = clients.find((c) => c.id === id);
   if (client) {
