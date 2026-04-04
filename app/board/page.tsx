@@ -266,7 +266,9 @@ export default function BoardPage() {
                         }`}
                       >
                         <div className="flex items-center gap-1.5">
-                          <span className="text-[11px] font-medium truncate">{getLastName(client.name)}</span>
+                          <span className="text-[11px] font-medium truncate">
+                            {getLastName(client.name)}{client.nextAction ? `: ${client.nextAction}` : ""}
+                          </span>
                         </div>
                         {(client.company || tCount > 0) && (
                           <div className="flex items-center gap-2 mt-1">
@@ -356,6 +358,7 @@ function ClientViewer({ client, events, onDelete, onUpdate }: {
     lat: client.lat != null ? String(client.lat) : "",
     lng: client.lng != null ? String(client.lng) : "",
     notes: client.notes || "",
+    nextAction: client.nextAction || "",
   });
 
   // Reset form when client changes
@@ -369,9 +372,10 @@ function ClientViewer({ client, events, onDelete, onUpdate }: {
       lat: client.lat != null ? String(client.lat) : "",
       lng: client.lng != null ? String(client.lng) : "",
       notes: client.notes || "",
+      nextAction: client.nextAction || "",
     });
     setEditing(false);
-  }, [client.id, client.name, client.company, client.phone, client.email, client.address, client.lat, client.lng, client.notes]);
+  }, [client.id, client.name, client.company, client.phone, client.email, client.address, client.lat, client.lng, client.notes, client.nextAction]);
 
   function handleSave() {
     const parsedLat = form.lat.trim() ? parseFloat(form.lat.trim()) : undefined;
@@ -387,6 +391,7 @@ function ClientViewer({ client, events, onDelete, onUpdate }: {
       lat: hasValidCoords ? parsedLat : undefined,
       lng: hasValidCoords ? parsedLng : undefined,
       notes: form.notes.trim() || undefined,
+      nextAction: form.nextAction.trim() || undefined,
     });
     setEditing(false);
 
@@ -424,6 +429,7 @@ function ClientViewer({ client, events, onDelete, onUpdate }: {
                     lat: client.lat != null ? String(client.lat) : "",
                     lng: client.lng != null ? String(client.lng) : "",
                     notes: client.notes || "",
+                    nextAction: client.nextAction || "",
                   });
                   setEditing(false);
                 } else {
@@ -527,6 +533,10 @@ function ClientViewer({ client, events, onDelete, onUpdate }: {
               <p className="text-[9px] text-gray-400 mt-0.5">In Google Maps: tap the pin → copy the coordinates → paste above</p>
             </div>
             <div>
+              <span className="text-[10px] font-semibold uppercase text-muted">Next Action</span>
+              <input value={form.nextAction} onChange={(e) => setForm((f) => ({ ...f, nextAction: e.target.value }))} className={fieldClass} placeholder="e.g. Follow up, Send proposal" />
+            </div>
+            <div>
               <span className="text-[10px] font-semibold uppercase text-muted">Notes</span>
               <textarea value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} rows={4} className={`${fieldClass} resize-y`} />
             </div>
@@ -546,6 +556,13 @@ function ClientViewer({ client, events, onDelete, onUpdate }: {
                 {statusInfo?.label || "Lead"}
               </div>
             </div>
+
+            {client.nextAction && (
+              <div>
+                <span className="text-[10px] font-semibold uppercase text-muted">Next Action</span>
+                <p className="text-xs mt-0.5 font-medium text-accent">{client.nextAction}</p>
+              </div>
+            )}
 
             {client.phone && (
               <div>

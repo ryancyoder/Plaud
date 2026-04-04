@@ -108,4 +108,5 @@ export interface Client {
   lng?: number;
   notes?: string;
   appointmentDate?: string;
+  nextAction?: string;
 }

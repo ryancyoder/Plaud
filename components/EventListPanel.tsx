@@ -256,6 +256,9 @@ function ClientInfoBanner({ client }: { client: Client }) {
               {statusInfo.label}
             </span>
           )}
+          {client.nextAction && (
+            <span className="text-[9px] font-medium text-accent truncate">{client.nextAction}</span>
+          )}
           {hasDetails && (
             <span className="text-[9px] text-gray-400">{expanded ? "Hide" : "Info"}</span>
           )}
