@@ -610,6 +610,8 @@ function DocumentList({
   const [blobUrls, setBlobUrls] = useState<Record<string, string>>({});
   const [markupHint, setMarkupHint] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const replaceDocRef = useRef<(Attachment & { eventId: string }) | null>(null);
+  const replaceInputRef = useRef<HTMLInputElement>(null);
 
   // Clean up blob URLs on unmount
   useEffect(() => {
@@ -711,44 +713,25 @@ function DocumentList({
     }
   }, [getBlobUrl]);
 
-  // Paste annotated PDF from clipboard, replacing the original
-  const handlePasteReplace = useCallback(async (doc: Attachment & { eventId: string }) => {
-    try {
-      const items = await navigator.clipboard.read();
-      let blob: Blob | null = null;
-      let mimeType = "";
+  // Replace a document with an annotated version from file picker
+  const handleReplaceStart = useCallback((doc: Attachment & { eventId: string }) => {
+    replaceDocRef.current = doc;
+    replaceInputRef.current?.click();
+  }, []);
 
-      for (const item of items) {
-        // Look for PDF first, then images
-        for (const type of item.types) {
-          if (type === "application/pdf" || type.startsWith("image/")) {
-            blob = await item.getType(type);
-            mimeType = type;
-            break;
-          }
-        }
-        if (blob) break;
-      }
+  const handleReplaceFile = useCallback((files: FileList | null) => {
+    const doc = replaceDocRef.current;
+    if (!files || files.length === 0 || !doc) return;
+    const file = files[0];
 
-      if (!blob) {
-        setMarkupHint(null);
-        alert("No PDF or image found on clipboard. Copy the annotated file first.");
-        return;
-      }
-
-      // Convert blob to data URL
-      const dataUrl = await new Promise<string>((resolve) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
-        reader.readAsDataURL(blob);
-      });
-
-      // Build replacement attachment with same ID (replaces in-place)
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
       const replacement: Attachment = {
-        id: doc.id,
-        name: doc.name.replace(/(\.\w+)$/, "-annotated$1"),
-        type: "document",
-        mimeType: mimeType || doc.mimeType,
+        id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        name: file.name,
+        type: file.type.startsWith("image/") ? "photo" : "document",
+        mimeType: file.type || doc.mimeType,
         dataUrl,
         timestamp: new Date().toISOString(),
       };
@@ -757,7 +740,7 @@ function DocumentList({
       onRemoveAttachment(doc.eventId, doc.id);
       onAddAttachments(doc.eventId, [replacement]);
 
-      // Clear blob URL cache for this doc
+      // Clear cached blob URL for old doc
       if (blobUrls[doc.id]) {
         URL.revokeObjectURL(blobUrls[doc.id]);
         setBlobUrls((prev) => {
@@ -768,14 +751,22 @@ function DocumentList({
       }
 
       setMarkupHint(null);
-    } catch (err) {
-      // Clipboard permission denied or read failed
-      alert("Could not read clipboard. Make sure you copied the annotated file.");
-    }
+      replaceDocRef.current = null;
+    };
+    reader.readAsDataURL(file);
   }, [onRemoveAttachment, onAddAttachments, blobUrls]);
 
   return (
     <div className="p-3">
+      {/* Hidden file input for replacing a document with annotated version */}
+      <input
+        ref={replaceInputRef}
+        type="file"
+        accept=".pdf,image/*"
+        className="hidden"
+        onChange={(e) => { handleReplaceFile(e.target.files); e.target.value = ""; }}
+      />
+
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-xs font-semibold">{heading}</h3>
         {canUpload && (
@@ -850,17 +841,17 @@ function DocumentList({
                 </div>
               </div>
 
-              {/* Paste annotated version back */}
+              {/* Replace with annotated version */}
               {markupHint === doc.id && (
                 <div className="mt-1 p-2.5 rounded-lg bg-purple-50 border border-purple-200 flex items-center gap-3">
                   <p className="text-[11px] text-purple-700 flex-1">
-                    Copy annotated file, then paste it back:
+                    Save annotated file to Files, then:
                   </p>
                   <button
-                    onClick={() => handlePasteReplace(doc)}
+                    onClick={() => handleReplaceStart(doc)}
                     className="text-[11px] px-3 py-1.5 rounded-lg bg-purple-600 text-white font-medium hover:bg-purple-700 active:scale-95 shrink-0"
                   >
-                    Paste &amp; Replace
+                    Replace with Annotated
                   </button>
                   <button
                     onClick={() => setMarkupHint(null)}
