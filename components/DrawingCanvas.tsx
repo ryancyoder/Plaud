@@ -36,7 +36,6 @@ export default function DrawingCanvas({
   const bgImageLoaded = useRef(false);
   const onStrokesChangeRef = useRef(onStrokesChange);
   onStrokesChangeRef.current = onStrokesChange;
-  const [penActive, setPenActive] = useState(false);
 
   // Canvas dimensions — match container
   const [dims, setDims] = useState({ w: 600, h: 800 });
@@ -104,6 +103,46 @@ export default function DrawingCanvas({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dims]);
 
+  // Prevent scroll/pan for Apple Pencil touches at the native level.
+  // Touch events fire before pointer events, so we must use a non-passive
+  // touchstart/touchmove listener to call preventDefault() for stylus touches.
+  // Finger touches (force === 0, no radiusX trick) pass through for scrolling.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    // On iOS, Apple Pencil touches have touchType "stylus" (Safari 13+)
+    const isStylusTouch = (t: Touch): boolean => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return (t as any).touchType === "stylus";
+    };
+
+    const onTouchStart = (e: TouchEvent) => {
+      for (let i = 0; i < e.touches.length; i++) {
+        if (isStylusTouch(e.touches[i])) {
+          e.preventDefault();
+          return;
+        }
+      }
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      for (let i = 0; i < e.touches.length; i++) {
+        if (isStylusTouch(e.touches[i])) {
+          e.preventDefault();
+          return;
+        }
+      }
+    };
+
+    canvas.addEventListener("touchstart", onTouchStart, { passive: false });
+    canvas.addEventListener("touchmove", onTouchMove, { passive: false });
+    return () => {
+      canvas.removeEventListener("touchstart", onTouchStart);
+      canvas.removeEventListener("touchmove", onTouchMove);
+    };
+  }, []);
+
   // Replay strokes onto the drawing canvas
   const redrawStrokes = useCallback((stks: ScratchpadStroke[]) => {
     const canvas = canvasRef.current;
@@ -166,7 +205,6 @@ export default function DrawingCanvas({
     if (e.pointerType !== "pen") return;
     e.preventDefault();
     isDrawing.current = true;
-    setPenActive(true);
     currentStroke.current = [getPos(e)];
 
     const canvas = canvasRef.current;
@@ -204,7 +242,6 @@ export default function DrawingCanvas({
   const handlePointerUp = useCallback(() => {
     if (!isDrawing.current) return;
     isDrawing.current = false;
-    setPenActive(false);
 
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -356,9 +393,9 @@ export default function DrawingCanvas({
             ref={bgCanvasRef}
             style={{ width: dims.w, height: dims.h, position: "absolute", top: 0, left: 0 }}
           />
-          {/* Drawing layer — touchAction "auto" lets fingers scroll/pan normally;
-              switches to "none" while Apple Pencil is actively drawing to prevent
-              accidental palm scrolling during strokes */}
+          {/* Drawing layer — touchAction "auto" lets fingers scroll/pan;
+              native touchstart/touchmove listeners block scrolling for
+              Apple Pencil (stylus) touches only */}
           <canvas
             ref={canvasRef}
             style={{
@@ -367,7 +404,7 @@ export default function DrawingCanvas({
               position: "absolute",
               top: 0,
               left: 0,
-              touchAction: penActive ? "none" : "auto",
+              touchAction: "auto",
               userSelect: "none",
               WebkitUserSelect: "none",
             }}
