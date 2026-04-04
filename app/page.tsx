@@ -325,6 +325,12 @@ export default function Dashboard() {
             Board
           </Link>
           <Link
+            href="/actions"
+            className="px-2.5 py-1 rounded-lg text-[10px] font-medium text-muted border border-border hover:bg-gray-50 active:scale-95"
+          >
+            Actions
+          </Link>
+          <Link
             href="/map"
             className="px-2.5 py-1 rounded-lg text-[10px] font-medium text-muted border border-border hover:bg-gray-50 active:scale-95"
           >

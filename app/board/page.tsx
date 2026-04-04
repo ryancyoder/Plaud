@@ -175,6 +175,12 @@ export default function BoardPage() {
             Dashboard
           </Link>
           <Link
+            href="/actions"
+            className="px-3 py-1.5 rounded-lg text-xs font-medium text-muted border border-border hover:bg-gray-50 active:scale-95"
+          >
+            Actions
+          </Link>
+          <Link
             href="/map"
             className="px-3 py-1.5 rounded-lg text-xs font-medium text-muted border border-border hover:bg-gray-50 active:scale-95"
           >
@@ -784,6 +790,7 @@ function ClientTimeline({ client, events: clientEvents }: { client: Client; even
     "note": "text-gray-600 bg-gray-50 border-gray-200",
     "recording": "text-rose-600 bg-rose-50 border-rose-200",
     "photo": "text-pink-600 bg-pink-50 border-pink-200",
+    "next-action": "text-green-700 bg-green-50 border-green-200",
   };
 
   return (

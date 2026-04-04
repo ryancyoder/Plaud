@@ -23,7 +23,8 @@ export type EventType =
   | "contract"
   | "delivery"
   | "payment"
-  | "note";
+  | "note"
+  | "next-action";
 
 export const EVENT_TYPES: { key: EventType; label: string }[] = [
   { key: "recording", label: "Recording" },
@@ -38,6 +39,7 @@ export const EVENT_TYPES: { key: EventType; label: string }[] = [
   { key: "delivery", label: "Delivery" },
   { key: "payment", label: "Payment" },
   { key: "note", label: "Note" },
+  { key: "next-action", label: "Next Action" },
 ];
 
 /**
