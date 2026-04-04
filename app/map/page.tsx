@@ -29,33 +29,35 @@ export default function MapPage() {
     setMounted(true);
   }, []);
 
-  // Auto-geocode clients with address but no coordinates
-  useEffect(() => {
-    if (!mounted || geocodingRef.current) return;
+  const needsGeocodingCount = useMemo(
+    () => clients.filter((c) => c.address && c.lat == null && c.lng == null).length,
+    [clients],
+  );
+
+  const handleGeocodeAll = useCallback(async () => {
+    if (geocodingRef.current) return;
+    geocodingRef.current = true;
     const needsGeocoding = clients.filter(
       (c) => c.address && c.lat == null && c.lng == null,
     );
-    if (needsGeocoding.length === 0) return;
-    geocodingRef.current = true;
     setGeocodingCount(needsGeocoding.length);
 
-    (async () => {
-      const { geocodeClientAddress } = await import("@/lib/clients");
-      for (let i = 0; i < needsGeocoding.length; i++) {
-        try {
-          await geocodeClientAddress(needsGeocoding[i].id);
-        } catch { /* skip */ }
-        setGeocodingCount(needsGeocoding.length - i - 1);
-        if (i < needsGeocoding.length - 1) {
-          await new Promise((r) => setTimeout(r, 1100));
-        }
+    const { geocodeClientAddress } = await import("@/lib/clients");
+    for (let i = 0; i < needsGeocoding.length; i++) {
+      try {
+        await geocodeClientAddress(needsGeocoding[i].id);
+      } catch (err) {
+        console.warn(`[map] Geocode failed for ${needsGeocoding[i].name}:`, err);
       }
-      // Reload after geocoding
-      setClients(loadClients());
-      setGeocodingCount(0);
-      geocodingRef.current = false;
-    })();
-  }, [mounted, clients]);
+      setGeocodingCount(needsGeocoding.length - i - 1);
+      if (i < needsGeocoding.length - 1) {
+        await new Promise((r) => setTimeout(r, 1100));
+      }
+    }
+    setClients(loadClients());
+    setGeocodingCount(0);
+    geocodingRef.current = false;
+  }, [clients]);
 
   // Filtered clients based on active status toggles
   const filteredClients = useMemo(
@@ -208,12 +210,22 @@ export default function MapPage() {
             </div>
           </div>
 
-          {/* Geocoding indicator */}
-          {geocodingCount > 0 && (
+          {/* Geocoding controls */}
+          {geocodingCount > 0 ? (
             <div className="shrink-0 px-3 py-1.5 bg-amber-50 border-b border-amber-200 text-[10px] text-amber-700">
               Geocoding {geocodingCount} client{geocodingCount !== 1 ? "s" : ""}...
             </div>
-          )}
+          ) : needsGeocodingCount > 0 ? (
+            <div className="shrink-0 px-3 py-1.5 border-b border-border flex items-center justify-between">
+              <span className="text-[10px] text-muted">{needsGeocodingCount} without coordinates</span>
+              <button
+                onClick={handleGeocodeAll}
+                className="text-[10px] px-2 py-0.5 rounded bg-accent text-white hover:bg-blue-600 active:scale-95 font-medium"
+              >
+                Geocode All
+              </button>
+            </div>
+          ) : null}
 
           {/* Client list */}
           <div className="flex-1 overflow-y-auto">

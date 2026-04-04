@@ -298,9 +298,7 @@ export async function reverseGeocode(coords: GpsCoords): Promise<string | null> 
 
   try {
     const url = `https://nominatim.openstreetmap.org/reverse?lat=${coords.lat}&lon=${coords.lng}&format=json&zoom=18&addressdetails=1`;
-    const resp = await fetch(url, {
-      headers: { "User-Agent": "PlaudApp/1.0" },
-    });
+    const resp = await fetch(url);
     if (!resp.ok) return null;
     const data = await resp.json();
     const addr = data.address;
@@ -328,14 +326,19 @@ export async function forwardGeocode(address: string): Promise<GpsCoords | null>
   if (!address.trim()) return null;
   try {
     const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json&limit=1`;
-    const resp = await fetch(url, {
-      headers: { "User-Agent": "PlaudApp/1.0" },
-    });
-    if (!resp.ok) return null;
+    const resp = await fetch(url);
+    if (!resp.ok) {
+      console.warn(`[forwardGeocode] HTTP ${resp.status} for "${address}"`);
+      return null;
+    }
     const results = await resp.json();
-    if (results.length === 0) return null;
+    if (results.length === 0) {
+      console.warn(`[forwardGeocode] No results for "${address}"`);
+      return null;
+    }
     return { lat: parseFloat(results[0].lat), lng: parseFloat(results[0].lng) };
-  } catch {
+  } catch (err) {
+    console.warn(`[forwardGeocode] Error for "${address}":`, err);
     return null;
   }
 }
