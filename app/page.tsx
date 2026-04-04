@@ -24,6 +24,7 @@ import ClientRoster from "@/components/ClientRoster";
 import WeekNav from "@/components/WeekNav";
 import ImportButton from "@/components/ImportButton";
 import SettingsModal from "@/components/SettingsModal";
+import NavButtons from "@/components/NavButtons";
 
 type SidebarTab = "calendar" | "contacts";
 
@@ -380,6 +381,7 @@ export default function Dashboard() {
         </div>
 
         <div className="flex items-center gap-2">
+          <NavButtons />
           <button
             onClick={() => setShowSettings(true)}
             className="p-1.5 rounded-lg text-muted hover:bg-gray-100 active:scale-95"

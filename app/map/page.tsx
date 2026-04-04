@@ -10,6 +10,7 @@ import { getLastName } from "@/lib/utils";
 import { STATUS_PIN_COLORS, DEFAULT_PIN_COLOR } from "@/lib/map-utils";
 import { getPersistedClientId, setPersistedClientId } from "@/lib/selected-client";
 import MapSearchOverlay from "@/components/MapSearchOverlay";
+import NavButtons from "@/components/NavButtons";
 
 const MapView = dynamic(() => import("@/components/MapView"), { ssr: false });
 
@@ -210,6 +211,7 @@ export default function MapPage() {
         </div>
 
         <div className="flex items-center gap-2">
+          <NavButtons />
           <span className="text-xs text-muted">
             {mappableClients.length} pin{mappableClients.length !== 1 ? "s" : ""}
             {unmappedCount > 0 && <span className="text-gray-400"> · {unmappedCount} unmapped</span>}

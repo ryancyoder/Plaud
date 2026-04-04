@@ -8,6 +8,7 @@ import { parseRfpClipboard, rfpToClientData } from "@/lib/rfp-parser";
 import { formatDuration, getLastName } from "@/lib/utils";
 import Link from "next/link";
 import { getPersistedClientId, setPersistedClientId } from "@/lib/selected-client";
+import NavButtons from "@/components/NavButtons";
 
 export default function BoardPage() {
   const [clients, setClients] = useState<Client[]>([]);
@@ -190,6 +191,7 @@ export default function BoardPage() {
         </div>
 
         <div className="flex items-center gap-2">
+          <NavButtons />
           <button
             onClick={handleClipboardImport}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-accent text-white hover:bg-blue-600 active:scale-95"
