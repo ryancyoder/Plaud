@@ -19,6 +19,7 @@ interface ViewerPanelProps {
   onAssignClient: (eventId: string, clientId: string | undefined) => void;
   onAddAttachments: (eventId: string, attachments: Attachment[]) => void;
   onRemoveAttachment: (eventId: string, attachmentId: string) => void;
+  onUpdateEvent?: (eventId: string, updates: Partial<AppEvent>) => void;
   viewMode: ViewMode;
   aggregateEvents: AppEvent[];
   selectedDate: string;
@@ -32,6 +33,7 @@ export default function ViewerPanel({
   onAssignClient,
   onAddAttachments,
   onRemoveAttachment,
+  onUpdateEvent,
   viewMode,
   aggregateEvents,
   selectedDate,
@@ -109,6 +111,7 @@ export default function ViewerPanel({
                 onClose={onClose}
                 onAssignClient={onAssignClient}
                 onAddAttachments={onAddAttachments}
+                onUpdateEvent={onUpdateEvent}
               />
             )}
             {viewMode === "client-aggregate" && (
@@ -163,22 +166,66 @@ function EventView({
   onClose,
   onAssignClient,
   onAddAttachments,
+  onUpdateEvent,
 }: {
   event: AppEvent | null;
   clients: Client[];
   onClose: () => void;
   onAssignClient: (eventId: string, clientId: string | undefined) => void;
   onAddAttachments: (eventId: string, attachments: Attachment[]) => void;
+  onUpdateEvent?: (eventId: string, updates: Partial<AppEvent>) => void;
 }) {
   const [showAssign, setShowAssign] = useState(false);
   const [transcriptMode, setTranscriptMode] = useState<"summary" | "raw">("summary");
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [editingField, setEditingField] = useState<"label" | "date" | "time" | "duration" | null>(null);
+  const [editVal, setEditVal] = useState("");
+  const editInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (event) { setTranscriptMode("summary"); setSummaryError(null); }
+    if (event) { setTranscriptMode("summary"); setSummaryError(null); setEditingField(null); }
   }, [event?.id]);
+
+  useEffect(() => {
+    if (editingField && editInputRef.current) {
+      editInputRef.current.focus();
+      editInputRef.current.select();
+    }
+  }, [editingField]);
+
+  const startEdit = useCallback((field: "label" | "date" | "time" | "duration") => {
+    if (!event || !onUpdateEvent) return;
+    setEditingField(field);
+    switch (field) {
+      case "label": setEditVal(event.label); break;
+      case "date": setEditVal(event.date); break;
+      case "time": setEditVal(event.startTime || ""); break;
+      case "duration": setEditVal(event.duration != null ? String(event.duration) : ""); break;
+    }
+  }, [event, onUpdateEvent]);
+
+  const saveEdit = useCallback(() => {
+    if (!event || !onUpdateEvent || !editingField) return;
+    const v = editVal.trim();
+    switch (editingField) {
+      case "label": if (v) onUpdateEvent(event.id, { label: v }); break;
+      case "date": if (/^\d{4}-\d{2}-\d{2}$/.test(v)) onUpdateEvent(event.id, { date: v }); break;
+      case "time": onUpdateEvent(event.id, { startTime: v || undefined }); break;
+      case "duration": {
+        const mins = v ? parseInt(v) : 0;
+        onUpdateEvent(event.id, { duration: isNaN(mins) ? 0 : mins });
+        break;
+      }
+    }
+    setEditingField(null);
+  }, [event, onUpdateEvent, editingField, editVal]);
+
+  const handleEditKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === "Enter") saveEdit();
+    else if (e.key === "Escape") setEditingField(null);
+  }, [saveEdit]);
 
   const aiSummary = event ? getCachedSegmentSummary(event.id) || event.summary : null;
 
@@ -209,17 +256,56 @@ function EventView({
 
   const assignedClient = event.clientId ? clients.find((c) => c.id === event.clientId) : null;
 
+  const canEdit = !!onUpdateEvent;
+  const fieldClass = "px-1.5 py-0.5 border border-accent rounded text-xs focus:outline-none focus:ring-1 focus:ring-accent";
+
+  function EditableField({ field, display, inputType, inputWidth }: { field: "label" | "date" | "time" | "duration"; display: string; inputType?: string; inputWidth?: string }) {
+    if (editingField === field) {
+      return (
+        <input
+          ref={editInputRef}
+          value={editVal}
+          onChange={(e) => setEditVal(e.target.value)}
+          onKeyDown={handleEditKeyDown}
+          onBlur={saveEdit}
+          type={inputType || "text"}
+          className={fieldClass}
+          style={{ width: inputWidth || "auto" }}
+        />
+      );
+    }
+    return (
+      <span
+        onClick={canEdit ? () => startEdit(field) : undefined}
+        className={canEdit ? "cursor-pointer hover:bg-gray-100 rounded px-0.5 -mx-0.5 transition-colors" : ""}
+        title={canEdit ? "Click to edit" : undefined}
+      >
+        {display}
+      </span>
+    );
+  }
+
   return (
     <div className="p-4">
-      <div className="flex items-start justify-between mb-3">
-        <p className="text-xs text-muted">
-          {formatDate(event.date)} · {event.startTime || ""} · {formatDuration(event.duration || 0)}
-        </p>
-        <button onClick={onClose} className="p-1.5 -mr-1 text-muted hover:text-foreground rounded-lg hover:bg-gray-100">
+      {/* Editable title */}
+      <div className="flex items-start justify-between mb-1">
+        <div className="flex-1 min-w-0 mr-2">
+          <EditableField field="label" display={event.label} inputWidth="100%" />
+        </div>
+        <button onClick={onClose} className="p-1.5 -mr-1 text-muted hover:text-foreground rounded-lg hover:bg-gray-100 shrink-0">
           <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M5 5l10 10M15 5L5 15" />
           </svg>
         </button>
+      </div>
+
+      {/* Editable date / time / duration */}
+      <div className="flex items-center gap-1.5 text-xs text-muted mb-3">
+        <EditableField field="date" display={formatDate(event.date)} inputType="date" inputWidth="130px" />
+        <span>·</span>
+        <EditableField field="time" display={event.startTime || "—"} inputType="time" inputWidth="90px" />
+        <span>·</span>
+        <EditableField field="duration" display={formatDuration(event.duration || 0)} inputType="number" inputWidth="60px" />
       </div>
 
       {/* Client assignment */}

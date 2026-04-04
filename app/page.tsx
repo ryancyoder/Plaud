@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { AppEvent, Attachment, Client } from "@/lib/types";
 import { getWeekDates } from "@/lib/mock-data";
-import { loadEvents, saveEvents } from "@/lib/event-store";
+import { loadEvents, saveEvents, updateEvent } from "@/lib/event-store";
 import { loadClients } from "@/lib/clients";
 import {
   saveAttachments as dbSaveAttachments,
@@ -303,6 +303,11 @@ export default function Dashboard() {
 
   }, []);
 
+  const handleUpdateEvent = useCallback((eventId: string, updates: Partial<AppEvent>) => {
+    updateEvent(eventId, updates);
+    setEvents((prev) => prev.map((ev) => ev.id === eventId ? { ...ev, ...updates } : ev));
+  }, []);
+
   const handleAssignClient = useCallback((eventId: string, clientId: string | undefined) => {
     setEvents((prev) => {
       const updated = prev.map((ev) =>
@@ -482,6 +487,7 @@ export default function Dashboard() {
             onAssignClient={handleAssignClient}
             onAddAttachments={handleAddAttachments}
             onRemoveAttachment={handleRemoveAttachment}
+            onUpdateEvent={handleUpdateEvent}
             viewMode={viewerMode}
             aggregateEvents={centerPanelEvents}
             selectedDate={selectedDate}
