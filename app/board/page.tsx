@@ -1,12 +1,13 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Client, ClientStatus, CLIENT_STATUSES, Transcript } from "@/lib/types";
+import { Client, ClientStatus, CLIENT_STATUSES, Transcript, ClientEvent, ClientEventType, CLIENT_EVENT_TYPES } from "@/lib/types";
 import { loadClients, saveClients, updateClientStatus, deleteClient, updateClient } from "@/lib/clients";
 import { loadTranscripts } from "@/lib/store";
 import { getTranscriptsForClient } from "@/lib/clients";
 import { parseRfpClipboard, rfpToClientData } from "@/lib/rfp-parser";
 import { formatDuration, getLastName } from "@/lib/utils";
+import { getEventsForClient, addEvent, deleteEvent, deleteEventsForClient } from "@/lib/events";
 import Link from "next/link";
 
 export default function BoardPage() {
@@ -39,12 +40,17 @@ export default function BoardPage() {
   );
 
   const handleDrop = useCallback((clientId: string, newStatus: ClientStatus) => {
+    const client = clients.find((c) => c.id === clientId);
+    const oldStatus = client?.status || "lead";
+    if (oldStatus === newStatus) { setDraggedClient(null); setDragOverColumn(null); return; }
     updateClientStatus(clientId, newStatus);
+    const statusLabel = CLIENT_STATUSES.find((s) => s.key === newStatus)?.label || newStatus;
+    addEvent(clientId, "status-change", new Date().toISOString(), `Status changed to ${statusLabel}`, true);
     setClients((prev) => prev.map((c) => c.id === clientId ? { ...c, status: newStatus } : c));
     setSelectedClient((prev) => prev?.id === clientId ? { ...prev, status: newStatus } : prev);
     setDraggedClient(null);
     setDragOverColumn(null);
-  }, []);
+  }, [clients]);
 
   // Touch handlers for iPad drag
   const handleTouchStart = useCallback((e: React.TouchEvent, client: Client) => {
@@ -277,6 +283,7 @@ export default function BoardPage() {
             transcripts={clientTranscripts}
             onDelete={(id) => {
               deleteClient(id);
+              deleteEventsForClient(id);
               setClients((prev) => prev.filter((c) => c.id !== id));
               setSelectedClient(null);
             }}
@@ -502,39 +509,229 @@ function ClientViewer({ client, transcripts, onDelete, onUpdate }: {
         )}
       </div>
 
-      {/* Transcript list */}
-      <div className="flex-1 overflow-y-auto">
-        <div className="px-4 py-3 border-b border-border bg-gray-50/50">
-          <h3 className="text-xs font-bold">Recordings ({transcripts.length})</h3>
-        </div>
-        {sorted.length === 0 ? (
-          <div className="flex items-center justify-center h-32 text-xs text-gray-300">
-            No recordings associated with this client
+      {/* Timeline + Recordings */}
+      <div className="flex-1 overflow-y-auto flex flex-col">
+        <ClientTimeline client={client} />
+
+        {/* Recordings */}
+        <div className="border-t border-border">
+          <div className="px-4 py-2 border-b border-border bg-gray-50/50">
+            <h3 className="text-[10px] font-bold uppercase text-muted">Recordings ({transcripts.length})</h3>
           </div>
-        ) : (
-          <div className="divide-y divide-gray-100">
-            {sorted.map((t) => (
-              <div key={t.id} className="px-4 py-2.5 hover:bg-gray-50">
-                <div className="flex items-center gap-3">
-                  <div className="shrink-0 w-14">
-                    <div className="text-[10px] text-muted">{t.date}</div>
-                    <div className="text-xs font-semibold tabular-nums">{t.startTime}</div>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <h4 className="text-xs font-medium truncate">{t.title}</h4>
-                    <p className="text-[10px] text-muted truncate mt-0.5">
-                      {t.summary.length > 120 ? t.summary.slice(0, 120) + "..." : t.summary}
-                    </p>
-                  </div>
-                  <div className="shrink-0 text-[10px] text-muted">
-                    {formatDuration(t.duration)}
+          {sorted.length === 0 ? (
+            <div className="flex items-center justify-center h-20 text-xs text-gray-300">
+              No recordings associated with this client
+            </div>
+          ) : (
+            <div className="divide-y divide-gray-100">
+              {sorted.map((t) => (
+                <div key={t.id} className="px-4 py-2.5 hover:bg-gray-50">
+                  <div className="flex items-center gap-3">
+                    <div className="shrink-0 w-14">
+                      <div className="text-[10px] text-muted">{t.date}</div>
+                      <div className="text-xs font-semibold tabular-nums">{t.startTime}</div>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h4 className="text-xs font-medium truncate">{t.title}</h4>
+                      <p className="text-[10px] text-muted truncate mt-0.5">
+                        {t.summary.length > 120 ? t.summary.slice(0, 120) + "..." : t.summary}
+                      </p>
+                    </div>
+                    <div className="shrink-0 text-[10px] text-muted">
+                      {formatDuration(t.duration)}
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        )}
+              ))}
+            </div>
+          )}
+        </div>
       </div>
+    </div>
+  );
+}
+
+// --- Event Icon ---
+
+function EventIcon({ type, size = 14 }: { type: ClientEventType; size?: number }) {
+  const s = String(size);
+  const props = { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
+
+  switch (type) {
+    case "site-visit":
+      return <svg {...props}><path d="M3 10.5L12 3l9 7.5" /><path d="M5 10v9a1 1 0 001 1h12a1 1 0 001-1v-9" /></svg>;
+    case "phone-call":
+      return <svg {...props}><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6A19.79 19.79 0 012.12 4.18 2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z" /></svg>;
+    case "text-message":
+      return <svg {...props}><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>;
+    case "email":
+      return <svg {...props}><rect x="2" y="4" width="20" height="16" rx="2" /><path d="M22 7l-10 7L2 7" /></svg>;
+    case "status-change":
+      return <svg {...props}><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" /><line x1="4" y1="22" x2="4" y2="15" /></svg>;
+    case "proposal":
+      return <svg {...props}><path d="M14.5 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V7.5L14.5 2z" /><polyline points="14 2 14 8 20 8" /></svg>;
+    case "contract":
+      return <svg {...props}><rect x="8" y="2" width="8" height="4" rx="1" /><path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2" /><path d="M9 14l2 2 4-4" /></svg>;
+    case "delivery":
+      return <svg {...props}><path d="M1 3h15v13H1z" /><path d="M16 8h4l3 3v5h-7V8z" /><circle cx="5.5" cy="18.5" r="2.5" /><circle cx="18.5" cy="18.5" r="2.5" /></svg>;
+    case "payment":
+      return <svg {...props}><line x1="12" y1="1" x2="12" y2="23" /><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6" /></svg>;
+    case "note":
+      return <svg {...props}><path d="M17 3a2.85 2.85 0 114 4L7.5 20.5 2 22l1.5-5.5Z" /></svg>;
+    default:
+      return <svg {...props}><circle cx="12" cy="12" r="4" /></svg>;
+  }
+}
+
+// --- Client Timeline ---
+
+function ClientTimeline({ client }: { client: Client }) {
+  const [events, setEvents] = useState<ClientEvent[]>([]);
+  const [showAdd, setShowAdd] = useState(false);
+  const [newType, setNewType] = useState<ClientEventType>("phone-call");
+  const [newDate, setNewDate] = useState(new Date().toISOString().slice(0, 10));
+  const [newLabel, setNewLabel] = useState("");
+
+  useEffect(() => {
+    refreshEvents();
+  }, [client.id]);
+
+  function refreshEvents() {
+    const stored = getEventsForClient(client.id);
+    // Auto-seed site-visit from appointmentDate if not already present
+    if (client.appointmentDate && !stored.some((e) => e.type === "site-visit" && e.auto)) {
+      addEvent(client.id, "site-visit", client.appointmentDate, "Site Visit", true);
+      setEvents(getEventsForClient(client.id));
+    } else {
+      setEvents(stored);
+    }
+  }
+
+  function handleAdd() {
+    if (!newLabel.trim()) return;
+    addEvent(client.id, newType, new Date(newDate).toISOString(), newLabel.trim());
+    setNewLabel("");
+    setShowAdd(false);
+    refreshEvents();
+  }
+
+  function handleDelete(eventId: string) {
+    deleteEvent(eventId);
+    refreshEvents();
+  }
+
+  const formatDate = (iso: string) => {
+    try {
+      const d = new Date(iso);
+      return isNaN(d.getTime()) ? iso : d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    } catch { return iso; }
+  };
+
+  const eventTypeColors: Record<ClientEventType, string> = {
+    "site-visit": "text-green-600 bg-green-50 border-green-200",
+    "phone-call": "text-blue-600 bg-blue-50 border-blue-200",
+    "text-message": "text-indigo-600 bg-indigo-50 border-indigo-200",
+    "email": "text-purple-600 bg-purple-50 border-purple-200",
+    "status-change": "text-amber-600 bg-amber-50 border-amber-200",
+    "proposal": "text-cyan-600 bg-cyan-50 border-cyan-200",
+    "contract": "text-teal-600 bg-teal-50 border-teal-200",
+    "delivery": "text-orange-600 bg-orange-50 border-orange-200",
+    "payment": "text-emerald-600 bg-emerald-50 border-emerald-200",
+    "note": "text-gray-600 bg-gray-50 border-gray-200",
+  };
+
+  return (
+    <div className="px-4 py-3">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-[10px] font-bold uppercase text-muted">Timeline</h3>
+        <button
+          onClick={() => setShowAdd(!showAdd)}
+          className="text-[10px] font-medium text-accent hover:text-blue-700"
+        >
+          {showAdd ? "Cancel" : "+ Add Event"}
+        </button>
+      </div>
+
+      {/* Add event form */}
+      {showAdd && (
+        <div className="mb-3 p-2.5 border border-border rounded-lg bg-gray-50/50 space-y-2">
+          <div className="flex gap-2">
+            <select
+              value={newType}
+              onChange={(e) => setNewType(e.target.value as ClientEventType)}
+              className="flex-1 px-2 py-1.5 border border-border rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-accent"
+            >
+              {CLIENT_EVENT_TYPES.filter((t) => t.key !== "status-change").map((t) => (
+                <option key={t.key} value={t.key}>{t.label}</option>
+              ))}
+            </select>
+            <input
+              type="date"
+              value={newDate}
+              onChange={(e) => setNewDate(e.target.value)}
+              className="px-2 py-1.5 border border-border rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-accent"
+            />
+          </div>
+          <div className="flex gap-2">
+            <input
+              value={newLabel}
+              onChange={(e) => setNewLabel(e.target.value)}
+              placeholder="Description..."
+              className="flex-1 px-2 py-1.5 border border-border rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-accent"
+              onKeyDown={(e) => e.key === "Enter" && handleAdd()}
+            />
+            <button
+              onClick={handleAdd}
+              disabled={!newLabel.trim()}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-accent text-white hover:bg-blue-600 active:scale-95 disabled:opacity-40"
+            >
+              Add
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Timeline visualization */}
+      {events.length === 0 ? (
+        <div className="text-center text-[10px] text-gray-300 py-4">No events yet</div>
+      ) : (
+        <div className="relative">
+          {/* Horizontal line */}
+          <div className="absolute left-0 right-0 top-[15px] h-px bg-gray-200" />
+
+          <div className="flex gap-0 overflow-x-auto pb-2" style={{ minHeight: 70 }}>
+            {events.map((ev, idx) => {
+              const colors = eventTypeColors[ev.type] || "text-gray-500 bg-gray-50 border-gray-200";
+              const colorParts = colors.split(" ");
+              return (
+                <div
+                  key={ev.id}
+                  className="flex flex-col items-center shrink-0 group relative"
+                  style={{ minWidth: 52 }}
+                >
+                  {/* Dot/icon */}
+                  <div className={`w-[30px] h-[30px] rounded-full border-2 flex items-center justify-center z-10 ${colorParts.slice(0, 3).join(" ")}`}>
+                    <EventIcon type={ev.type} size={13} />
+                  </div>
+                  {/* Date */}
+                  <div className="text-[9px] text-muted mt-1 tabular-nums whitespace-nowrap">{formatDate(ev.date)}</div>
+                  {/* Label */}
+                  <div className="text-[9px] text-center leading-tight mt-0.5 max-w-[60px] truncate">{ev.label}</div>
+
+                  {/* Hover delete for non-auto or any event */}
+                  <button
+                    onClick={() => handleDelete(ev.id)}
+                    className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-white items-center justify-center text-[8px] hidden group-hover:flex z-20"
+                    title="Remove event"
+                  >
+                    &times;
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

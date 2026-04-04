@@ -348,6 +348,7 @@ const BACKUP_KEYS = [
   "plaud-segment-summaries",
   "plaud-prompt-templates",
   "plaud-api-log",
+  "plaud-client-events",
   "plaud-gap-threshold",
   "plaud-min-duration",
 ];

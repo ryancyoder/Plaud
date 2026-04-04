@@ -39,6 +39,40 @@ export const CLIENT_STATUSES: { key: ClientStatus; label: string; color: string 
   { key: "paid-in-full", label: "Paid in Full", color: "bg-green-50 text-green-700 border-green-200" },
 ];
 
+export type ClientEventType =
+  | "site-visit"
+  | "phone-call"
+  | "text-message"
+  | "email"
+  | "status-change"
+  | "proposal"
+  | "contract"
+  | "delivery"
+  | "payment"
+  | "note";
+
+export const CLIENT_EVENT_TYPES: { key: ClientEventType; label: string; icon: string }[] = [
+  { key: "site-visit", label: "Site Visit", icon: "house" },
+  { key: "phone-call", label: "Phone Call", icon: "phone" },
+  { key: "text-message", label: "Text Message", icon: "message" },
+  { key: "email", label: "Email", icon: "mail" },
+  { key: "status-change", label: "Status Change", icon: "flag" },
+  { key: "proposal", label: "Proposal", icon: "file" },
+  { key: "contract", label: "Contract", icon: "clipboard" },
+  { key: "delivery", label: "Delivery", icon: "truck" },
+  { key: "payment", label: "Payment", icon: "dollar" },
+  { key: "note", label: "Note", icon: "pencil" },
+];
+
+export interface ClientEvent {
+  id: string;
+  clientId: string;
+  type: ClientEventType;
+  date: string; // ISO date string
+  label: string; // short description
+  auto?: boolean; // true if system-generated
+}
+
 export interface Client {
   id: string;
   name: string;
