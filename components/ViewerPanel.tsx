@@ -4,7 +4,6 @@ import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { AppEvent, Attachment, Client } from "@/lib/types";
 import { formatDuration, getTagColor, formatDate } from "@/lib/utils";
 import { hasApiKey, getCachedSegmentSummary, generateSegmentSummary, getCachedSummary, generateDailySummary } from "@/lib/claude-api";
-import { getPhotosForClient } from "@/lib/event-store";
 
 type Tab = "transcript" | "photos";
 type ViewMode = "event" | "client-aggregate" | "day-aggregate";
@@ -41,14 +40,11 @@ export default function ViewerPanel({
     if (viewMode === "event" && selectedEvent) {
       return selectedEvent.attachments?.filter((a) => a.mimeType.startsWith("image/")).length ?? 0;
     }
-    if (viewMode === "client-aggregate" && selectedClient) {
-      return getPhotosForClient(selectedClient.id).length;
-    }
-    if (viewMode === "day-aggregate") {
+    if (viewMode === "client-aggregate" || viewMode === "day-aggregate") {
       return aggregateEvents.reduce((n, ev) => n + (ev.attachments?.filter((a) => a.mimeType.startsWith("image/")).length ?? 0), 0);
     }
     return 0;
-  }, [viewMode, selectedEvent, selectedClient, aggregateEvents]);
+  }, [viewMode, selectedEvent, aggregateEvents]);
 
   const tabs: { key: Tab; label: string; count?: number }[] = [
     { key: "transcript", label: viewMode === "event" ? "Detail" : "Overview" },
@@ -558,14 +554,7 @@ function PhotoGallery({
         .filter((a) => a.mimeType.startsWith("image/"))
         .map((a) => ({ ...a, eventLabel: event.label, eventDate: event.date }));
     }
-    if (viewMode === "client-aggregate" && selectedClient) {
-      return getPhotosForClient(selectedClient.id).map((cp) => ({
-        ...cp.attachment,
-        eventLabel: cp.event.label,
-        eventDate: cp.event.date,
-      }));
-    }
-    if (viewMode === "day-aggregate") {
+    if (viewMode === "client-aggregate" || viewMode === "day-aggregate") {
       const result: (Attachment & { eventLabel: string; eventDate: string })[] = [];
       for (const ev of aggregateEvents) {
         for (const att of ev.attachments || []) {
@@ -577,7 +566,7 @@ function PhotoGallery({
       return result;
     }
     return [];
-  }, [viewMode, event, selectedClient, aggregateEvents]);
+  }, [viewMode, event, aggregateEvents]);
 
   const handleSwipe = useCallback(
     (direction: "left" | "right") => {
