@@ -15,7 +15,7 @@ import {
   ApiLogEntry,
 } from "@/lib/claude-api";
 
-type SettingsTab = "api-key" | "api-log" | "prompts";
+type SettingsTab = "api-key" | "api-log" | "prompts" | "data";
 
 interface SettingsModalProps {
   open: boolean;
@@ -48,6 +48,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
               { key: "api-key" as const, label: "API Key" },
               { key: "api-log" as const, label: "API Log" },
               { key: "prompts" as const, label: "Prompts" },
+              { key: "data" as const, label: "Data" },
             ]).map((t) => (
               <button
                 key={t.key}
@@ -68,6 +69,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
           {tab === "api-key" && <ApiKeyTab />}
           {tab === "api-log" && <ApiLogTab />}
           {tab === "prompts" && <PromptsTab />}
+          {tab === "data" && <DataTab />}
         </div>
       </div>
     </div>
@@ -275,7 +277,7 @@ function PromptsTab() {
   return (
     <div className="p-5">
       <p className="text-xs text-muted mb-4">
-        Edit the prompts sent to Claude. Use the placeholder variables shown below each prompt — they&apos;ll be replaced with actual data at call time.
+        Edit the prompts sent to Claude. Use the placeholder variables shown below each prompt — they&rsquo;ll be replaced with actual data at call time.
       </p>
 
       <div className="space-y-3">
@@ -331,6 +333,119 @@ function PromptsTab() {
           Reset to Defaults
         </button>
         {saved && <span className="text-[10px] text-green-600 font-medium">Saved</span>}
+      </div>
+    </div>
+  );
+}
+
+// --- Data Tab ---
+
+const BACKUP_KEYS = [
+  "plaud-transcripts",
+  "plaud-lists",
+  "plaud-clients",
+  "plaud-daily-summaries",
+  "plaud-segment-summaries",
+  "plaud-prompt-templates",
+  "plaud-api-log",
+  "plaud-gap-threshold",
+  "plaud-min-duration",
+];
+
+function DataTab() {
+  const [importStatus, setImportStatus] = useState<{ message: string; error?: boolean } | null>(null);
+
+  function handleExport() {
+    const backup: Record<string, unknown> = {
+      _meta: {
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        app: "plaud-transcripts",
+      },
+    };
+    for (const key of BACKUP_KEYS) {
+      const val = localStorage.getItem(key);
+      if (val !== null) {
+        try {
+          backup[key] = JSON.parse(val);
+        } catch {
+          backup[key] = val;
+        }
+      }
+    }
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `plaud-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function handleImport() {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".json";
+    input.onchange = () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const data = JSON.parse(reader.result as string);
+          if (!data._meta) {
+            setImportStatus({ message: "Invalid backup file — missing metadata.", error: true });
+            return;
+          }
+          let count = 0;
+          for (const key of BACKUP_KEYS) {
+            if (key in data) {
+              const val = data[key];
+              localStorage.setItem(key, typeof val === "string" ? val : JSON.stringify(val));
+              count++;
+            }
+          }
+          setImportStatus({ message: `Restored ${count} data entries. Reload the page to see changes.` });
+        } catch {
+          setImportStatus({ message: "Failed to parse backup file.", error: true });
+        }
+      };
+      reader.readAsText(file);
+    };
+    input.click();
+  }
+
+  return (
+    <div className="p-5 space-y-5">
+      <div>
+        <h3 className="text-xs font-semibold mb-1">Export Backup</h3>
+        <p className="text-[10px] text-muted mb-3">
+          Download all app data (clients, transcripts, summaries, settings) as a JSON file.
+        </p>
+        <button
+          onClick={handleExport}
+          className="px-4 py-2 rounded-lg text-sm font-medium bg-accent text-white hover:bg-blue-600 active:scale-[0.98]"
+        >
+          Export Backup
+        </button>
+      </div>
+
+      <div className="pt-3 border-t border-border">
+        <h3 className="text-xs font-semibold mb-1">Import Backup</h3>
+        <p className="text-[10px] text-muted mb-3">
+          Restore from a previously exported backup file. This will overwrite current data.
+        </p>
+        <button
+          onClick={handleImport}
+          className="px-4 py-2 rounded-lg text-sm font-medium text-muted border border-border hover:bg-gray-100 active:scale-[0.98]"
+        >
+          Import Backup
+        </button>
+        {importStatus && (
+          <p className={`text-[10px] mt-2 ${importStatus.error ? "text-red-500" : "text-green-600"}`}>
+            {importStatus.message}
+          </p>
+        )}
       </div>
     </div>
   );
