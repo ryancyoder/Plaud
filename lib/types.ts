@@ -27,9 +27,10 @@ export interface Transcript {
 
 export type Tag = "meeting" | "call" | "personal" | "medical" | "errand" | "brainstorm" | "interview" | "discussion" | "advertisement";
 
-export type ClientStatus = "propose" | "sent" | "schedule" | "project-management" | "collections" | "paid-in-full";
+export type ClientStatus = "lead" | "propose" | "sent" | "schedule" | "project-management" | "collections" | "paid-in-full";
 
 export const CLIENT_STATUSES: { key: ClientStatus; label: string; color: string }[] = [
+  { key: "lead", label: "Lead", color: "bg-gray-100 text-gray-600 border-gray-200" },
   { key: "propose", label: "Propose", color: "bg-blue-50 text-blue-700 border-blue-200" },
   { key: "sent", label: "Sent", color: "bg-purple-50 text-purple-700 border-purple-200" },
   { key: "schedule", label: "Schedule", color: "bg-amber-50 text-amber-700 border-amber-200" },

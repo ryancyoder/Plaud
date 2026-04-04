@@ -32,7 +32,7 @@ export default function BoardPage() {
   }, []);
 
   const getClientsForStatus = useCallback(
-    (status: ClientStatus) => clients.filter((c) => (c.status || "propose") === status),
+    (status: ClientStatus) => clients.filter((c) => (c.status || "lead") === status),
     [clients]
   );
 
