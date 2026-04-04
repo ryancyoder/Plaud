@@ -26,7 +26,7 @@ export default function ClientRoster({
   const [newType, setNewType] = useState<"client" | "contact">("client");
   const [search, setSearch] = useState("");
 
-  const sorted = [...clients].sort((a, b) => a.name.localeCompare(b.name));
+  const sorted = [...clients].sort((a, b) => getLastName(a.name).localeCompare(getLastName(b.name)));
   const filtered = search
     ? sorted.filter(
         (c) =>
