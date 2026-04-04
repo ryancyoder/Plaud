@@ -45,6 +45,11 @@ export interface Client {
   company?: string;
   type: "client" | "contact";
   status?: ClientStatus;
+  phone?: string;
+  email?: string;
+  address?: string;
+  notes?: string;
+  appointmentDate?: string;
   transcriptCount: number;
   lastSeen?: string;
 }

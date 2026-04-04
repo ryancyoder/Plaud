@@ -5,6 +5,7 @@ import { Client, ClientStatus, CLIENT_STATUSES, Transcript } from "@/lib/types";
 import { loadClients, saveClients, updateClientStatus } from "@/lib/clients";
 import { loadTranscripts } from "@/lib/store";
 import { getTranscriptsForClient } from "@/lib/clients";
+import { parseRfpClipboard, rfpToClientData } from "@/lib/rfp-parser";
 import { formatDuration } from "@/lib/utils";
 import Link from "next/link";
 
@@ -13,6 +14,7 @@ export default function BoardPage() {
   const [transcripts, setTranscripts] = useState<Transcript[]>([]);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [mounted, setMounted] = useState(false);
+  const [importToast, setImportToast] = useState<string | null>(null);
 
   // Drag state
   const [draggedClient, setDraggedClient] = useState<Client | null>(null);
@@ -82,6 +84,43 @@ export default function BoardPage() {
     setDragOverColumn(null);
   }, [handleDrop]);
 
+  const handleClipboardImport = useCallback(async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (!text.trim()) {
+        setImportToast("Clipboard is empty");
+        setTimeout(() => setImportToast(null), 3000);
+        return;
+      }
+      const rfp = parseRfpClipboard(text);
+      const clientData = rfpToClientData(rfp);
+
+      // Check for duplicate
+      const existing = loadClients();
+      const dupe = existing.find((c) => c.name.toLowerCase() === clientData.name.toLowerCase());
+      if (dupe) {
+        setImportToast(`"${dupe.name}" already exists`);
+        setTimeout(() => setImportToast(null), 3000);
+        setSelectedClient(dupe);
+        return;
+      }
+
+      const newClient: Client = {
+        ...clientData,
+        id: `c-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      };
+      const updated = [...existing, newClient];
+      saveClients(updated);
+      setClients(updated);
+      setSelectedClient(newClient);
+      setImportToast(`Imported "${newClient.name}"`);
+      setTimeout(() => setImportToast(null), 3000);
+    } catch (err) {
+      setImportToast(err instanceof Error ? err.message : "Failed to parse clipboard");
+      setTimeout(() => setImportToast(null), 4000);
+    }
+  }, []);
+
   const clientTranscripts = selectedClient
     ? getTranscriptsForClient(transcripts, selectedClient)
     : [];
@@ -115,8 +154,21 @@ export default function BoardPage() {
           <span className="text-sm font-semibold">Client Board</span>
         </div>
 
-        <div className="text-xs text-muted">
-          {clients.length} client{clients.length !== 1 ? "s" : ""}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleClipboardImport}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-accent text-white hover:bg-blue-600 active:scale-95"
+            title="Import client from clipboard (Outlook RFP)"
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
+              <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+            </svg>
+            Import from Clipboard
+          </button>
+          <span className="text-xs text-muted">
+            {clients.length} client{clients.length !== 1 ? "s" : ""}
+          </span>
         </div>
       </header>
 
@@ -235,6 +287,13 @@ export default function BoardPage() {
           </div>
         )}
       </div>
+
+      {/* Toast */}
+      {importToast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-gray-900 text-white px-4 py-2 rounded-lg shadow-lg text-sm z-50">
+          {importToast}
+        </div>
+      )}
     </div>
   );
 }
@@ -270,10 +329,43 @@ function ClientViewer({ client, transcripts }: { client: Client; transcripts: Tr
             </div>
           </div>
 
-          <div>
-            <span className="text-[10px] font-semibold uppercase text-muted">Type</span>
-            <p className="text-xs mt-0.5 capitalize">{client.type}</p>
-          </div>
+          {client.phone && (
+            <div>
+              <span className="text-[10px] font-semibold uppercase text-muted">Phone</span>
+              <p className="text-xs mt-0.5">{client.phone}</p>
+            </div>
+          )}
+
+          {client.email && (
+            <div>
+              <span className="text-[10px] font-semibold uppercase text-muted">Email</span>
+              <p className="text-xs mt-0.5 break-all">{client.email}</p>
+            </div>
+          )}
+
+          {client.address && (
+            <div>
+              <span className="text-[10px] font-semibold uppercase text-muted">Address</span>
+              <p className="text-xs mt-0.5">{client.address}</p>
+            </div>
+          )}
+
+          {client.appointmentDate && (
+            <div>
+              <span className="text-[10px] font-semibold uppercase text-muted">Appointment</span>
+              <p className="text-xs mt-0.5">
+                {(() => {
+                  try {
+                    const d = new Date(client.appointmentDate);
+                    return isNaN(d.getTime()) ? client.appointmentDate : d.toLocaleString("en-US", {
+                      weekday: "short", month: "short", day: "numeric", year: "numeric",
+                      hour: "numeric", minute: "2-digit",
+                    });
+                  } catch { return client.appointmentDate; }
+                })()}
+              </p>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-2">
             <div className="bg-gray-50 rounded-lg p-2.5 text-center">
@@ -290,6 +382,13 @@ function ClientViewer({ client, transcripts }: { client: Client; transcripts: Tr
             <div>
               <span className="text-[10px] font-semibold uppercase text-muted">Last Recording</span>
               <p className="text-xs mt-0.5">{sorted[0].date} at {sorted[0].startTime}</p>
+            </div>
+          )}
+
+          {client.notes && (
+            <div>
+              <span className="text-[10px] font-semibold uppercase text-muted">Notes</span>
+              <p className="text-xs mt-0.5 leading-relaxed whitespace-pre-wrap text-gray-700">{client.notes}</p>
             </div>
           )}
         </div>
