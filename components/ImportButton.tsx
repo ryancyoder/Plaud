@@ -73,7 +73,7 @@ export default function ImportButton({
     createdEvents: AppEvent[];
     segments: PhotoSegment[];
     totalFiles: number;
-    diagnostics: { fileTypes: Record<string, number>; gpsFound: number; gpsTotal: number };
+    diagnostics: { fileTypes: Record<string, number>; gpsFound: number; gpsTotal: number; clientsWithCoords: number; clientsTotal: number; matchDetails: { segmentLabel: string; closestClient: string | null; distanceMeters: number | null }[] };
   } | null>(null);
   const [pendingImageFiles, setPendingImageFiles] = useState<FileList | null>(null);
   const [fallbackLocation, setFallbackLocation] = useState<GpsCoords | null>(null);
@@ -115,12 +115,22 @@ export default function ImportButton({
     setPhotoError(null);
 
     try {
+      // Geocode any clients that have addresses but no coordinates
+      const { geocodeAllClients } = await import("@/lib/clients");
+      const geocoded = await geocodeAllClients();
+      // Reload clients if any were geocoded so we have fresh lat/lng
+      let activeClients = clients;
+      if (geocoded > 0) {
+        const { loadClients } = await import("@/lib/clients");
+        activeClients = loadClients();
+      }
+
       const result = await batchMatchPhotos(
         pendingImageFiles,
         photoMatchRecordings ? events : [],
         photoGapMinutes,
         photoBufferMinutes,
-        clients,
+        activeClients,
       );
 
       if (result.matched.length > 0) {
@@ -682,6 +692,20 @@ export default function ImportButton({
                     <p className="text-[10px] text-gray-500">
                       GPS extracted: {photoResults.diagnostics.gpsFound} of {photoResults.diagnostics.gpsTotal} photos
                     </p>
+                    <p className="text-[10px] text-gray-500">
+                      Clients with coordinates: {photoResults.diagnostics.clientsWithCoords} of {photoResults.diagnostics.clientsTotal}
+                    </p>
+                    {photoResults.diagnostics.matchDetails.length > 0 && (
+                      <div className="mt-1 space-y-0.5">
+                        {photoResults.diagnostics.matchDetails.map((md, i) => (
+                          <p key={i} className="text-[10px] text-gray-500">
+                            {md.segmentLabel}: {md.closestClient
+                              ? `nearest client "${md.closestClient}" at ${md.distanceMeters}m${md.distanceMeters! <= 500 ? " (matched)" : " (>500m, not matched)"}`
+                              : "no geocoded clients to compare"}
+                          </p>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   {photoResults.matched.length > 0 && (

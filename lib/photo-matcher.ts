@@ -363,7 +363,7 @@ export function haversineMeters(a: GpsCoords, b: GpsCoords): number {
 export function findClosestClient(
   coords: GpsCoords,
   clients: Client[],
-  maxMeters = 200,
+  maxMeters = 500,
 ): Client | null {
   let best: Client | null = null;
   let bestDist = Infinity;
@@ -504,6 +504,9 @@ export interface BatchMatchResult {
     fileTypes: Record<string, number>;
     gpsFound: number;
     gpsTotal: number;
+    clientsWithCoords: number;
+    clientsTotal: number;
+    matchDetails: { segmentLabel: string; closestClient: string | null; distanceMeters: number | null }[];
   };
 }
 
@@ -563,24 +566,44 @@ export async function batchMatchPhotos(
 
   const segments = segmentPhotosByTime(unmatchedRaw, gapMinutes);
 
+  const clientsWithCoords = clients.filter((c) => c.lat != null && c.lng != null).length;
+  const matchDetails: { segmentLabel: string; closestClient: string | null; distanceMeters: number | null }[] = [];
+
   // Reverse-geocode and match clients for each segment
   for (const seg of segments) {
     if (seg.gps) {
-      // Reverse geocode for address label
       try {
         seg.address = await reverseGeocode(seg.gps);
       } catch {
-        // skip — address stays null
+        // skip
       }
-      // Match to closest client
       seg.matchedClient = findClosestClient(seg.gps, clients);
+
+      // Find closest client regardless of threshold for diagnostics
+      let closestName: string | null = null;
+      let closestDist: number | null = null;
+      for (const c of clients) {
+        if (c.lat == null || c.lng == null) continue;
+        const d = haversineMeters(seg.gps, { lat: c.lat, lng: c.lng });
+        if (closestDist === null || d < closestDist) {
+          closestDist = d;
+          closestName = c.name;
+        }
+      }
+      matchDetails.push({
+        segmentLabel: seg.address || `${seg.gps.lat.toFixed(4)}, ${seg.gps.lng.toFixed(4)}`,
+        closestClient: closestName,
+        distanceMeters: closestDist !== null ? Math.round(closestDist) : null,
+      });
+    } else {
+      matchDetails.push({ segmentLabel: "No GPS", closestClient: null, distanceMeters: null });
     }
   }
 
   return {
     matched: Array.from(matched.values()),
     unmatchedSegments: segments,
-    diagnostics: { fileTypes, gpsFound, gpsTotal },
+    diagnostics: { fileTypes, gpsFound, gpsTotal, clientsWithCoords, clientsTotal: clients.length, matchDetails },
   };
 }
 
