@@ -58,14 +58,17 @@ export function parseRfpClipboard(text: string): ParsedRfp {
       continue;
     }
 
-    // First line: Name (and possibly phone)
+    // First line: Name (and possibly phone, parenthetical notes)
     if (i === 0) {
-      const phoneMatch = line.match(phonePattern);
+      let firstLine = line;
+      // Strip parenthetical notes like (confirmed), (rescheduled), etc.
+      firstLine = firstLine.replace(/\s*\([^)]*\)\s*/g, " ").trim();
+      const phoneMatch = firstLine.match(phonePattern);
       if (phoneMatch) {
         phone = normalizePhone(phoneMatch[1]);
-        name = line.replace(phoneMatch[0], "").trim();
+        name = firstLine.replace(phoneMatch[0], "").trim();
       } else {
-        name = line;
+        name = firstLine;
       }
       continue;
     }
