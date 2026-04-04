@@ -367,24 +367,6 @@ function ClientViewer({ client, transcripts }: { client: Client; transcripts: Tr
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-2">
-            <div className="bg-gray-50 rounded-lg p-2.5 text-center">
-              <div className="text-lg font-bold">{transcripts.length}</div>
-              <div className="text-[10px] text-muted">Recordings</div>
-            </div>
-            <div className="bg-gray-50 rounded-lg p-2.5 text-center">
-              <div className="text-lg font-bold">{formatDuration(totalDuration)}</div>
-              <div className="text-[10px] text-muted">Total Time</div>
-            </div>
-          </div>
-
-          {sorted.length > 0 && (
-            <div>
-              <span className="text-[10px] font-semibold uppercase text-muted">Last Recording</span>
-              <p className="text-xs mt-0.5">{sorted[0].date} at {sorted[0].startTime}</p>
-            </div>
-          )}
-
           {client.notes && (
             <div>
               <span className="text-[10px] font-semibold uppercase text-muted">Notes</span>
