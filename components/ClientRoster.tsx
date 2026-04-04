@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Client } from "@/lib/types";
 import { addClient, deleteClient } from "@/lib/clients";
+import { getLastName } from "@/lib/utils";
 
 interface ClientRosterProps {
   clients: Client[];
@@ -218,7 +219,7 @@ function ClientRow({
 
       {/* Info */}
       <div className="flex-1 min-w-0">
-        <div className="text-xs font-medium truncate">{client.name}</div>
+        <div className="text-xs font-medium truncate">{getLastName(client.name)}</div>
         {client.company && (
           <div className="text-[10px] text-muted truncate">{client.company}</div>
         )}

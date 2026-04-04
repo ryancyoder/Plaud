@@ -66,3 +66,9 @@ const tagBlockColors: Record<Tag, string> = {
 export function getBlockColor(tag: Tag): string {
   return tagBlockColors[tag] || "border-l-gray-500 bg-gray-50";
 }
+
+/** Returns last name from a full name, or the full name if single word. */
+export function getLastName(fullName: string): string {
+  const parts = fullName.trim().split(/\s+/);
+  return parts.length > 1 ? parts[parts.length - 1] : fullName;
+}

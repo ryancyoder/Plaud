@@ -6,7 +6,7 @@ import { loadClients, saveClients, updateClientStatus } from "@/lib/clients";
 import { loadTranscripts } from "@/lib/store";
 import { getTranscriptsForClient } from "@/lib/clients";
 import { parseRfpClipboard, rfpToClientData } from "@/lib/rfp-parser";
-import { formatDuration } from "@/lib/utils";
+import { formatDuration, getLastName } from "@/lib/utils";
 import Link from "next/link";
 
 export default function BoardPage() {
@@ -242,7 +242,7 @@ export default function BoardPage() {
                           }`}>
                             {client.name.charAt(0).toUpperCase()}
                           </div>
-                          <span className="text-[11px] font-medium truncate">{client.name}</span>
+                          <span className="text-[11px] font-medium truncate">{getLastName(client.name)}</span>
                         </div>
                         {(client.company || tCount > 0) && (
                           <div className="flex items-center gap-2 mt-1 pl-6.5">
