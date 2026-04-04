@@ -111,9 +111,11 @@ export default function MapPage() {
   }, []);
 
   const handleSelectClient = useCallback((id: string | null) => {
-    setPlacingClientId(null);
-    setSelectedClientId((prev) => (prev === id ? null : id));
-  }, []);
+    // Don't cancel placing mode on regular client clicks
+    if (!placingClientId) {
+      setSelectedClientId((prev) => (prev === id ? null : id));
+    }
+  }, [placingClientId]);
 
   // Start placing mode for a client without coordinates
   const handleStartPlacing = useCallback((clientId: string) => {
@@ -121,11 +123,22 @@ export default function MapPage() {
     setSelectedClientId(clientId);
   }, []);
 
-  // Place a client on the map at the tapped location
+  // Place a client on the map, then auto-advance to next unmapped client
   const handlePlaceClient = useCallback((clientId: string, lat: number, lng: number) => {
     updateClient(clientId, { lat, lng });
-    setClients(loadClients());
-    setPlacingClientId(null);
+    const refreshed = loadClients();
+    setClients(refreshed);
+
+    // Find next unmapped client and auto-advance
+    const unmapped = refreshed.filter(
+      (c) => c.id !== clientId && c.lat == null && c.lng == null,
+    );
+    if (unmapped.length > 0) {
+      setPlacingClientId(unmapped[0].id);
+      setSelectedClientId(unmapped[0].id);
+    } else {
+      setPlacingClientId(null);
+    }
   }, []);
 
   // Cancel placing mode
@@ -175,15 +188,42 @@ export default function MapPage() {
       {/* Placing mode banner */}
       {placingClient && (
         <div className="shrink-0 px-4 py-2 bg-blue-50 border-b border-blue-200 flex items-center justify-between">
-          <span className="text-xs text-blue-800 font-medium">
-            Tap the map to place <strong>{placingClient.name}</strong>
-          </span>
-          <button
-            onClick={handleCancelPlacing}
-            className="text-[10px] px-2.5 py-0.5 rounded border border-blue-300 text-blue-600 hover:bg-blue-100 active:scale-95 font-medium"
-          >
-            Cancel
-          </button>
+          <div>
+            <span className="text-xs text-blue-800 font-medium">
+              Tap the map to place <strong>{placingClient.name}</strong>
+            </span>
+            {placingClient.address && (
+              <span className="text-[10px] text-blue-600 ml-2">({placingClient.address})</span>
+            )}
+            {unmappedCount > 1 && (
+              <span className="text-[10px] text-blue-500 ml-2">· {unmappedCount - 1} more after this</span>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => {
+                // Skip this client, advance to next unmapped
+                const unmapped = clients.filter(
+                  (c) => c.id !== placingClientId && c.lat == null && c.lng == null,
+                );
+                if (unmapped.length > 0) {
+                  setPlacingClientId(unmapped[0].id);
+                  setSelectedClientId(unmapped[0].id);
+                } else {
+                  setPlacingClientId(null);
+                }
+              }}
+              className="text-[10px] px-2.5 py-0.5 rounded border border-blue-300 text-blue-600 hover:bg-blue-100 active:scale-95 font-medium"
+            >
+              Skip
+            </button>
+            <button
+              onClick={handleCancelPlacing}
+              className="text-[10px] px-2.5 py-0.5 rounded border border-blue-300 text-blue-600 hover:bg-blue-100 active:scale-95 font-medium"
+            >
+              Done
+            </button>
+          </div>
         </div>
       )}
 
@@ -249,20 +289,34 @@ export default function MapPage() {
             </div>
           </div>
 
-          {/* Geocode controls */}
+          {/* Unmapped client actions */}
           {geocodeStatus ? (
             <div className="shrink-0 px-3 py-1.5 bg-amber-50 border-b border-amber-200 text-[10px] text-amber-700">
               {geocodeStatus}
             </div>
-          ) : needsGeocodingCount > 0 ? (
+          ) : needsGeocodingCount > 0 && !placingClientId ? (
             <div className="shrink-0 px-3 py-1.5 border-b border-border flex items-center justify-between">
-              <span className="text-[10px] text-muted">{needsGeocodingCount} need geocoding</span>
-              <button
-                onClick={handleGeocodeAll}
-                className="text-[10px] px-2 py-0.5 rounded bg-accent text-white hover:bg-blue-600 active:scale-95 font-medium"
-              >
-                Geocode All
-              </button>
+              <span className="text-[10px] text-muted">{needsGeocodingCount} unmapped</span>
+              <div className="flex gap-1.5">
+                <button
+                  onClick={() => {
+                    const unmapped = clients.filter((c) => c.lat == null && c.lng == null);
+                    if (unmapped.length > 0) {
+                      setPlacingClientId(unmapped[0].id);
+                      setSelectedClientId(unmapped[0].id);
+                    }
+                  }}
+                  className="text-[10px] px-2 py-0.5 rounded bg-blue-500 text-white hover:bg-blue-600 active:scale-95 font-medium"
+                >
+                  Place All
+                </button>
+                <button
+                  onClick={handleGeocodeAll}
+                  className="text-[10px] px-2 py-0.5 rounded border border-gray-300 text-muted hover:bg-gray-50 active:scale-95 font-medium"
+                >
+                  Auto-Geocode
+                </button>
+              </div>
             </div>
           ) : null}
 
@@ -302,6 +356,19 @@ export default function MapPage() {
                             <div className="text-[10px] text-gray-400 truncate">{client.company}</div>
                           )}
                         </div>
+                        {hasCoords && isSelected && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              updateClient(client.id, { lat: undefined, lng: undefined });
+                              setClients(loadClients());
+                            }}
+                            className="text-[8px] px-1.5 py-0.5 rounded border border-red-200 text-red-400 hover:bg-red-50 active:scale-95 font-medium shrink-0"
+                            title="Remove pin"
+                          >
+                            Unpin
+                          </button>
+                        )}
                         {!hasCoords && !isPlacing && (
                           <button
                             onClick={(e) => {
