@@ -100,7 +100,7 @@ export default function ViewerPanel({
       </div>
 
       {/* Collapsible client info banner */}
-      {activeClient && <ClientInfoBanner client={activeClient} />}
+      {(activeClient || selectedClient) && <ClientInfoBanner client={(activeClient || selectedClient)!} />}
 
       <div className={`flex-1 ${activeTab === "scratchpad" ? "overflow-hidden flex flex-col" : "overflow-y-auto"}`}>
         {activeTab === "transcript" && (
