@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 import { importParsedSegments, importFromText, addEvent } from "@/lib/event-store";
 import { srtToSegments, ParsedTranscript } from "@/lib/srt-parser";
 import { AppEvent, Attachment, Client } from "@/lib/types";
-import { batchMatchPhotos, PhotoMatchResult } from "@/lib/photo-matcher";
+import { batchMatchPhotos, PhotoMatchResult, PhotoSegment } from "@/lib/photo-matcher";
 import { saveAttachments as dbSaveAttachments } from "@/lib/attachment-store";
 
 interface ImportButtonProps {
@@ -71,6 +71,7 @@ export default function ImportButton({
   const [photoResults, setPhotoResults] = useState<{
     matched: PhotoMatchResult[];
     createdEvents: AppEvent[];
+    segments: PhotoSegment[]; // parallel to createdEvents — carries GPS/address
     totalFiles: number;
   } | null>(null);
   const [pendingImageFiles, setPendingImageFiles] = useState<FileList | null>(null);
@@ -155,6 +156,7 @@ export default function ImportButton({
       setPhotoResults({
         matched: result.matched,
         createdEvents: created,
+        segments: result.unmatchedSegments,
         totalFiles: pendingImageFiles.length,
       });
       setPhotoStep("results");
@@ -632,7 +634,8 @@ export default function ImportButton({
                       <h3 className="text-[10px] font-semibold uppercase text-muted mb-2">Photo Events Created</h3>
                       <p className="text-[10px] text-gray-400 mb-2">Grouped by time and location, added to calendar</p>
                       <div className="space-y-2">
-                        {photoResults.createdEvents.map((ev) => {
+                        {photoResults.createdEvents.map((ev, idx) => {
+                          const seg = photoResults.segments[idx];
                           const assignedClient = ev.clientId ? clients.find((c) => c.id === ev.clientId) : null;
                           return (
                             <div key={ev.id} className="rounded-lg border border-blue-200 bg-blue-50 p-2.5">
@@ -640,6 +643,25 @@ export default function ImportButton({
                                 <span className="text-xs font-semibold text-blue-800">{ev.label}</span>
                                 <span className="text-[10px] text-blue-600">{ev.date}</span>
                               </div>
+                              {/* GPS / Location info */}
+                              {seg?.gps ? (
+                                <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+                                  <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded-full">
+                                    GPS: {seg.gps.lat.toFixed(4)}, {seg.gps.lng.toFixed(4)}
+                                  </span>
+                                  {seg.address && (
+                                    <span className="text-[10px] bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded-full">
+                                      {seg.address}
+                                    </span>
+                                  )}
+                                </div>
+                              ) : (
+                                <div className="mb-1.5">
+                                  <span className="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full">
+                                    No GPS data
+                                  </span>
+                                </div>
+                              )}
                               {assignedClient && (
                                 <div className="mb-1.5">
                                   <span className="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full">
