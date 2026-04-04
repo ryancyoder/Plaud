@@ -63,19 +63,20 @@ export default function Dashboard() {
       attachments: (t.attachments || []).map(({ dataUrl, ...rest }) => ({ ...rest, dataUrl: "" })),
     }));
     setClients(loadClients());
+    setTranscripts(cleaned);
 
     Promise.all([loadAllAttachments(), loadPendingPhotos()])
       .then(([allAtts, pending]) => {
-        const merged = cleaned.map((t) => ({
-          ...t,
-          attachments: allAtts[t.id] || t.attachments || [],
-        }));
         setPendingPhotoCount(pending.length);
-        setTranscripts(merged);
+        setTranscripts((prev) =>
+          prev.map((t) => ({
+            ...t,
+            attachments: allAtts[t.id] || t.attachments || [],
+          }))
+        );
         setMounted(true);
       })
       .catch(() => {
-        setTranscripts(cleaned);
         setMounted(true);
       });
   }, []);
