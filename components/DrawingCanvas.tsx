@@ -36,6 +36,7 @@ export default function DrawingCanvas({
   const bgImageLoaded = useRef(false);
   const onStrokesChangeRef = useRef(onStrokesChange);
   onStrokesChangeRef.current = onStrokesChange;
+  const [penActive, setPenActive] = useState(false);
 
   // Canvas dimensions — match container
   const [dims, setDims] = useState({ w: 600, h: 800 });
@@ -161,13 +162,16 @@ export default function DrawingCanvas({
   }, []);
 
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
-    // Only draw with pen or touch, not mouse hover
+    // Only respond to Apple Pencil (pen) — ignore finger/touch and mouse
+    if (e.pointerType !== "pen") return;
     e.preventDefault();
     isDrawing.current = true;
+    setPenActive(true);
     currentStroke.current = [getPos(e)];
 
     const canvas = canvasRef.current;
     if (!canvas) return;
+    canvas.setPointerCapture(e.pointerId);
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     ctx.beginPath();
@@ -182,6 +186,7 @@ export default function DrawingCanvas({
 
   const handlePointerMove = useCallback((e: React.PointerEvent) => {
     if (!isDrawing.current) return;
+    if (e.pointerType !== "pen") return;
     e.preventDefault();
     const pos = getPos(e);
     currentStroke.current.push(pos);
@@ -199,6 +204,7 @@ export default function DrawingCanvas({
   const handlePointerUp = useCallback(() => {
     if (!isDrawing.current) return;
     isDrawing.current = false;
+    setPenActive(false);
 
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -338,18 +344,33 @@ export default function DrawingCanvas({
         </button>
       </div>
 
-      {/* Canvas area */}
-      <div ref={containerRef} className="flex-1 overflow-auto bg-gray-200 relative">
+      {/* Canvas area — fingers scroll, only Apple Pencil draws */}
+      <div
+        ref={containerRef}
+        className="flex-1 overflow-auto bg-gray-200 relative"
+        style={{ userSelect: "none", WebkitUserSelect: "none" }}
+      >
         <div className="relative" style={{ width: dims.w, height: dims.h }}>
           {/* Background layer (white + optional image) */}
           <canvas
             ref={bgCanvasRef}
             style={{ width: dims.w, height: dims.h, position: "absolute", top: 0, left: 0 }}
           />
-          {/* Drawing layer */}
+          {/* Drawing layer — touchAction "auto" lets fingers scroll/pan normally;
+              switches to "none" while Apple Pencil is actively drawing to prevent
+              accidental palm scrolling during strokes */}
           <canvas
             ref={canvasRef}
-            style={{ width: dims.w, height: dims.h, position: "absolute", top: 0, left: 0, touchAction: "none" }}
+            style={{
+              width: dims.w,
+              height: dims.h,
+              position: "absolute",
+              top: 0,
+              left: 0,
+              touchAction: penActive ? "none" : "auto",
+              userSelect: "none",
+              WebkitUserSelect: "none",
+            }}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
