@@ -159,6 +159,12 @@ export default function BoardPage() {
           >
             Dashboard
           </Link>
+          <Link
+            href="/map"
+            className="px-3 py-1.5 rounded-lg text-xs font-medium text-muted border border-border hover:bg-gray-50 active:scale-95"
+          >
+            Map
+          </Link>
           <span className="text-sm font-semibold">Client Board</span>
         </div>
 
