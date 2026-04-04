@@ -12,11 +12,9 @@ import {
   loadAllAttachments,
   clearAllAttachments,
   clearPendingPhotos,
-  loadPendingPhotos,
-  removePendingPhotos,
   resizeImage,
 } from "@/lib/attachment-store";
-import { matchPhotoToEvent, PhotoMatchResult } from "@/lib/photo-matcher";
+import { PhotoMatchResult } from "@/lib/photo-matcher";
 import { hasApiKey, processSegmentWithAI } from "@/lib/claude-api";
 import { isToday } from "@/lib/utils";
 import EventListPanel from "@/components/EventListPanel";
@@ -52,7 +50,7 @@ export default function Dashboard() {
   const [weekOffset, setWeekOffset] = useState(0);
   const [selectedDate, setSelectedDate] = useState(todayDateStr());
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>("calendar");
-  const [pendingPhotoCount, setPendingPhotoCount] = useState(0);
+
   const [showSettings, setShowSettings] = useState(false);
   const [mounted, setMounted] = useState(false);
 
@@ -78,9 +76,8 @@ export default function Dashboard() {
     setClients(loadClients());
     setEvents(cleaned);
 
-    Promise.all([loadAllAttachments(), loadPendingPhotos()])
-      .then(([allAtts, pending]) => {
-        setPendingPhotoCount(pending.length);
+    loadAllAttachments()
+      .then((allAtts) => {
         setEvents((prev) =>
           prev.map((ev) => ({
             ...ev,
@@ -156,63 +153,8 @@ export default function Dashboard() {
     setSelectedEventId(null);
   }, []);
 
-  const rematchPendingPhotos = useCallback(async (allEvents: AppEvent[]) => {
-    const pending = await loadPendingPhotos();
-    if (pending.length === 0) return;
-
-    const recordings = allEvents.filter((ev) => ev.type === "recording");
-    const matched: Map<string, PhotoMatchResult> = new Map();
-    const matchedIds: string[] = [];
-
-    for (const photo of pending) {
-      const photoDate = new Date(photo.timestamp);
-      const match = matchPhotoToEvent(photoDate, recordings);
-      if (match) {
-        matchedIds.push(photo.id);
-        const existing = matched.get(match.id);
-        if (existing) {
-          existing.attachments.push(photo);
-        } else {
-          matched.set(match.id, {
-            eventId: match.id,
-            eventTitle: match.label,
-            attachments: [photo],
-          });
-        }
-      }
-    }
-
-    if (matched.size > 0) {
-      const results = Array.from(matched.values());
-      for (const r of results) {
-        await dbSaveAttachments(r.eventId, r.attachments);
-      }
-      await removePendingPhotos(matchedIds);
-      setEvents((prev) => {
-        const updated = prev.map((ev) => {
-          const m = results.find((r) => r.eventId === ev.id);
-          if (!m) return ev;
-          return { ...ev, attachments: [...(ev.attachments || []), ...m.attachments] };
-        });
-        const forStorage = updated.map((ev) => ({
-          ...ev,
-          attachments: (ev.attachments || []).map(({ dataUrl, ...rest }) => ({ ...rest, dataUrl: "" })),
-        }));
-        saveEvents(forStorage);
-        return updated;
-      });
-    }
-
-    const stillPending = pending.length - matchedIds.length;
-    setPendingPhotoCount(stillPending);
-  }, []);
-
   const handleImport = useCallback((newEvents: AppEvent[]) => {
-    setEvents((prev) => {
-      const updated = [...prev, ...newEvents];
-      rematchPendingPhotos(updated);
-      return updated;
-    });
+    setEvents((prev) => [...prev, ...newEvents]);
 
     if (hasApiKey()) {
       (async () => {
@@ -236,14 +178,13 @@ export default function Dashboard() {
         }
       })();
     }
-  }, [rematchPendingPhotos]);
+  }, []);
 
   const handleClearData = useCallback(() => {
     if (window.confirm("Clear all imported data? This cannot be undone.")) {
       saveEvents([]);
       clearAllAttachments().catch(() => {});
       clearPendingPhotos().catch(() => {});
-      setPendingPhotoCount(0);
       setEvents([]);
       setSelectedEventId(null);
     }
@@ -330,7 +271,6 @@ export default function Dashboard() {
       return updated;
     });
 
-    loadPendingPhotos().then((p) => setPendingPhotoCount(p.length)).catch(() => {});
   }, []);
 
   const handleAssignClient = useCallback((eventId: string, clientId: string | undefined) => {
@@ -410,7 +350,7 @@ export default function Dashboard() {
             </svg>
           </button>
           <ImportButton onImport={handleImport} />
-          <BatchPhotoImport events={events} clients={clients} onPhotosMatched={handleBatchPhotos} pendingCount={pendingPhotoCount} onPendingCountChange={setPendingPhotoCount} />
+          <BatchPhotoImport events={events} clients={clients} onPhotosMatched={handleBatchPhotos} onEventsCreated={(created) => setEvents(loadEvents())} />
           {events.length > 0 && (
             <button
               onClick={handleClearData}

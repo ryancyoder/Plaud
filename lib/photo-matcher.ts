@@ -194,14 +194,76 @@ export interface UnmatchedPhoto {
 }
 
 /**
+ * A segment of photos grouped by temporal proximity.
+ * Photos within `gapMinutes` of each other belong to the same segment.
+ */
+export interface PhotoSegment {
+  attachments: Attachment[];
+  startTime: Date;
+  endTime: Date;
+  date: string; // YYYY-MM-DD
+}
+
+/**
+ * Group photos into segments based on timestamp gaps.
+ * Photos are sorted by time, then split whenever the gap between
+ * consecutive photos exceeds `gapMinutes` (default 30).
+ */
+export function segmentPhotosByTime(
+  photos: { attachment: Attachment; timestamp: Date }[],
+  gapMinutes = 30,
+): PhotoSegment[] {
+  if (photos.length === 0) return [];
+
+  const sorted = [...photos].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+  const gapMs = gapMinutes * 60 * 1000;
+  const segments: PhotoSegment[] = [];
+
+  let current: typeof sorted = [sorted[0]];
+
+  for (let i = 1; i < sorted.length; i++) {
+    const gap = sorted[i].timestamp.getTime() - sorted[i - 1].timestamp.getTime();
+    if (gap > gapMs) {
+      segments.push(buildSegment(current));
+      current = [sorted[i]];
+    } else {
+      current.push(sorted[i]);
+    }
+  }
+  segments.push(buildSegment(current));
+
+  return segments;
+}
+
+function buildSegment(photos: { attachment: Attachment; timestamp: Date }[]): PhotoSegment {
+  const startTime = photos[0].timestamp;
+  const endTime = photos[photos.length - 1].timestamp;
+  const d = startTime;
+  const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return {
+    attachments: photos.map((p) => p.attachment),
+    startTime,
+    endTime,
+    date,
+  };
+}
+
+export interface BatchMatchResult {
+  matched: PhotoMatchResult[];
+  unmatchedSegments: PhotoSegment[];
+}
+
+/**
  * Process a batch of photo files: extract timestamps, resize, match to recording events.
+ * Unmatched photos are grouped into segments by timestamp gaps (default 30 min).
  */
 export async function batchMatchPhotos(
   files: FileList,
   events: AppEvent[],
-): Promise<{ matched: PhotoMatchResult[]; unmatched: UnmatchedPhoto[] }> {
+  gapMinutes = 30,
+): Promise<BatchMatchResult> {
   const matched: Map<string, PhotoMatchResult> = new Map();
-  const unmatched: UnmatchedPhoto[] = [];
+  const unmatchedRaw: { attachment: Attachment; timestamp: Date }[] = [];
 
   for (const file of Array.from(files)) {
     if (!file.type.startsWith("image/")) continue;
@@ -232,19 +294,13 @@ export async function batchMatchPhotos(
         });
       }
     } else {
-      const dateStr = `${timestamp.getFullYear()}-${String(timestamp.getMonth() + 1).padStart(2, "0")}-${String(timestamp.getDate()).padStart(2, "0")}`;
-      const hasSameDay = events.some((e) => e.date === dateStr);
-      unmatched.push({
-        attachment,
-        timestamp,
-        reason: hasSameDay ? "Outside any recording window" : "No recordings on this date",
-      });
+      unmatchedRaw.push({ attachment, timestamp });
     }
   }
 
   return {
     matched: Array.from(matched.values()),
-    unmatched,
+    unmatchedSegments: segmentPhotosByTime(unmatchedRaw, gapMinutes),
   };
 }
 
