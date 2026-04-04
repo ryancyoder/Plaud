@@ -384,47 +384,69 @@ export function findClosestClient(
  */
 function normalizeAddress(addr: string): string {
   let s = addr.toLowerCase().trim();
-  // Expand common abbreviations
+  // Remove punctuation first, collapse whitespace
+  s = s.replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+  // Expand common street-type abbreviations (applied after punctuation removal)
   const abbrevs: [RegExp, string][] = [
-    [/\bst\b/g, "street"],
-    [/\bave?\b/g, "avenue"],
-    [/\bblvd\b/g, "boulevard"],
-    [/\bdr\b/g, "drive"],
-    [/\bln\b/g, "lane"],
-    [/\brd\b/g, "road"],
-    [/\bct\b/g, "court"],
-    [/\bpl\b/g, "place"],
-    [/\bpkwy\b/g, "parkway"],
-    [/\bcir\b/g, "circle"],
-    [/\bn\b/g, "north"],
-    [/\bs\b/g, "south"],
-    [/\be\b/g, "east"],
-    [/\bw\b/g, "west"],
+    [/\bstreet\b/g, "st"], // normalize to short form
+    [/\bavenue\b/g, "ave"],
+    [/\bboulevard\b/g, "blvd"],
+    [/\bdrive\b/g, "dr"],
+    [/\blane\b/g, "ln"],
+    [/\broad\b/g, "rd"],
+    [/\bcourt\b/g, "ct"],
+    [/\bplace\b/g, "pl"],
+    [/\bparkway\b/g, "pkwy"],
+    [/\bcircle\b/g, "cir"],
+    [/\bnorth\b/g, "n"],
+    [/\bsouth\b/g, "s"],
+    [/\beast\b/g, "e"],
+    [/\bwest\b/g, "w"],
   ];
   for (const [pat, rep] of abbrevs) {
     s = s.replace(pat, rep);
   }
-  // Remove punctuation, collapse whitespace
-  s = s.replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, " ").trim();
-  return s;
+  return s.trim();
 }
 
 /**
- * Compute similarity between two strings as a 0-1 score.
- * Uses token overlap (Jaccard-like) for address matching.
+ * Compute similarity between two addresses using multiple strategies:
+ * 1. Token overlap (Jaccard on smaller set)
+ * 2. Substring containment (one address contains the other's street)
+ * Returns the highest score (0-1).
  */
-function addressSimilarity(a: string, b: string): number {
-  const tokensA = new Set(normalizeAddress(a).split(" "));
-  const tokensB = new Set(normalizeAddress(b).split(" "));
+export function addressSimilarity(a: string, b: string): number {
+  const normA = normalizeAddress(a);
+  const normB = normalizeAddress(b);
+  const tokensA = new Set(normA.split(" ").filter((t) => t.length > 1));
+  const tokensB = new Set(normB.split(" ").filter((t) => t.length > 1));
   if (tokensA.size === 0 || tokensB.size === 0) return 0;
+
+  // Token overlap score
   let intersection = 0;
   for (const t of tokensA) {
     if (tokensB.has(t)) intersection++;
   }
-  // Use size of smaller set as denominator — if all tokens of the
-  // shorter address appear in the longer one, that's a strong match.
   const minSize = Math.min(tokensA.size, tokensB.size);
-  return intersection / minSize;
+  const tokenScore = intersection / minSize;
+
+  // Substring containment: check if one normalized address contains the other
+  let substringScore = 0;
+  if (normA.includes(normB) || normB.includes(normA)) {
+    substringScore = 0.8;
+  }
+
+  // Check if the street number + name match (first 2-3 tokens)
+  const wordsA = normA.split(" ").filter((t) => t.length > 1);
+  const wordsB = normB.split(" ").filter((t) => t.length > 1);
+  if (wordsA.length >= 2 && wordsB.length >= 2) {
+    // If first token is a number and matches, and second token matches, strong signal
+    if (/^\d+$/.test(wordsA[0]) && wordsA[0] === wordsB[0] && wordsA[1] === wordsB[1]) {
+      substringScore = Math.max(substringScore, 0.7);
+    }
+  }
+
+  return Math.max(tokenScore, substringScore);
 }
 
 /**
@@ -434,7 +456,7 @@ function addressSimilarity(a: string, b: string): number {
 export function findClientByAddress(
   photoAddress: string,
   clients: Client[],
-  threshold = 0.5,
+  threshold = 0.4,
 ): Client | null {
   let best: Client | null = null;
   let bestScore = 0;
@@ -651,46 +673,63 @@ export async function batchMatchPhotos(
   const clientsWithCoords = clients.filter((c) => c.lat != null && c.lng != null).length;
   const matchDetails: { segmentLabel: string; closestClient: string | null; distanceMeters: number | null }[] = [];
 
-  // Reverse-geocode and match clients for each segment
-  for (const seg of segments) {
-    if (seg.gps) {
-      try {
-        seg.address = await reverseGeocode(seg.gps);
-      } catch {
-        // skip
-      }
+  // Reverse-geocode segments sequentially (Nominatim 1 req/sec rate limit)
+  for (let si = 0; si < segments.length; si++) {
+    const seg = segments[si];
+    if (!seg.gps) {
+      matchDetails.push({ segmentLabel: "No GPS", closestClient: null, distanceMeters: null });
+      continue;
+    }
 
-      // Strategy 1: GPS coordinate matching (if clients have coordinates)
-      seg.matchedClient = findClosestClient(seg.gps, clients);
+    // Rate-limit: wait 1.1s between geocode calls (skip first)
+    if (si > 0) await new Promise((r) => setTimeout(r, 1100));
 
-      // Strategy 2: Text-based address matching (fallback when clients lack coordinates)
-      if (!seg.matchedClient && seg.address) {
-        seg.matchedClient = findClientByAddress(seg.address, clients);
-      }
+    try {
+      seg.address = await reverseGeocode(seg.gps);
+    } catch (err) {
+      console.warn("[photo-matcher] reverseGeocode failed:", err);
+    }
 
-      // Find closest client regardless of threshold for diagnostics
-      let closestName: string | null = null;
-      let closestDist: number | null = null;
-      for (const c of clients) {
-        if (c.lat == null || c.lng == null) continue;
-        const d = haversineMeters(seg.gps, { lat: c.lat, lng: c.lng });
-        if (closestDist === null || d < closestDist) {
-          closestDist = d;
-          closestName = c.name;
+    console.log(`[photo-matcher] Segment ${si}: GPS=${seg.gps.lat.toFixed(5)},${seg.gps.lng.toFixed(5)} → address="${seg.address}"`);
+
+    // Strategy 1: GPS coordinate matching (if clients have coordinates)
+    seg.matchedClient = findClosestClient(seg.gps, clients);
+
+    // Strategy 2: Text-based address matching (fallback when clients lack coordinates)
+    if (!seg.matchedClient && seg.address) {
+      seg.matchedClient = findClientByAddress(seg.address, clients);
+      if (seg.matchedClient) {
+        console.log(`[photo-matcher] Address match: "${seg.address}" → client "${seg.matchedClient.name}" (address: "${seg.matchedClient.address}")`);
+      } else {
+        // Log why no match was found
+        for (const c of clients) {
+          if (c.address) {
+            const score = addressSimilarity(seg.address, c.address);
+            console.log(`[photo-matcher] Address compare: photo="${seg.address}" vs client "${c.name}" addr="${c.address}" → score=${score.toFixed(2)}`);
+          }
         }
       }
-      // If matched by address text, note it in diagnostics
-      if (!closestName && seg.matchedClient) {
-        closestName = seg.matchedClient.name + " (address match)";
-      }
-      matchDetails.push({
-        segmentLabel: seg.address || `${seg.gps.lat.toFixed(4)}, ${seg.gps.lng.toFixed(4)}`,
-        closestClient: closestName,
-        distanceMeters: closestDist !== null ? Math.round(closestDist) : null,
-      });
-    } else {
-      matchDetails.push({ segmentLabel: "No GPS", closestClient: null, distanceMeters: null });
     }
+
+    // Diagnostics
+    let closestName: string | null = null;
+    let closestDist: number | null = null;
+    for (const c of clients) {
+      if (c.lat == null || c.lng == null) continue;
+      const d = haversineMeters(seg.gps, { lat: c.lat, lng: c.lng });
+      if (closestDist === null || d < closestDist) {
+        closestDist = d;
+        closestName = c.name;
+      }
+    }
+    if (!closestName && seg.matchedClient) {
+      closestName = seg.matchedClient.name + " (address match)";
+    }
+    matchDetails.push({
+      segmentLabel: seg.address || `${seg.gps.lat.toFixed(4)}, ${seg.gps.lng.toFixed(4)}`,
+      closestClient: closestName,
+      distanceMeters: closestDist !== null ? Math.round(closestDist) : null,
+    });
   }
 
   return {
