@@ -589,10 +589,17 @@ export default function ImportButton({
                     </div>
                   )}
 
+                  {/* Location info */}
+                  <div className="rounded-lg bg-amber-50 border border-amber-200 p-3 space-y-2">
+                    <p className="text-[10px] text-amber-800 font-medium">
+                      To keep photo GPS data, tap <strong>Browse</strong> (not Photo Library) when the picker appears. iOS strips location from Photo Library uploads.
+                    </p>
+                  </div>
+
                   {/* Location fallback */}
                   <div className="rounded-lg bg-gray-50 border border-gray-200 p-3 space-y-2">
                     <p className="text-[10px] text-muted">
-                      GPS will be extracted from photo EXIF. If photos lack location data, use your current location as fallback.
+                      If photos lack GPS, use your current location as fallback for naming and client matching.
                     </p>
                     {fallbackLocation ? (
                       <div className="flex items-center gap-2">
