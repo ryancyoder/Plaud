@@ -73,7 +73,7 @@ export default function ImportButton({
     createdEvents: AppEvent[];
     segments: PhotoSegment[];
     totalFiles: number;
-    diagnostics: { fileTypes: Record<string, number>; gpsFound: number; gpsTotal: number; clientsWithCoords: number; clientsTotal: number; matchDetails: { segmentLabel: string; closestClient: string | null; distanceMeters: number | null }[] };
+    diagnostics: { fileTypes: Record<string, number>; gpsFound: number; gpsTotal: number; clientsWithCoords: number; clientsTotal: number; matchDetails: { segmentLabel: string; closestClient: string | null; distanceMeters: number | null; matchMethod?: "gps" | "address" | null }[] };
   } | null>(null);
   const [pendingImageFiles, setPendingImageFiles] = useState<FileList | null>(null);
   const [fallbackLocation, setFallbackLocation] = useState<GpsCoords | null>(null);
@@ -695,10 +695,12 @@ export default function ImportButton({
                       <div className="mt-1 space-y-0.5">
                         {photoResults.diagnostics.matchDetails.map((md, i) => (
                           <p key={i} className="text-[10px] text-gray-500">
-                            {md.segmentLabel}: {md.closestClient
-                              ? md.distanceMeters != null
-                                ? `nearest client "${md.closestClient}" at ${md.distanceMeters}m${md.distanceMeters <= 2000 ? " (matched)" : " (>2km, not matched)"}`
-                                : `matched "${md.closestClient}"`
+                            {md.segmentLabel}: {md.matchMethod === "gps"
+                              ? `GPS match "${md.closestClient}" at ${md.distanceMeters}m`
+                              : md.matchMethod === "address"
+                              ? `address match "${md.closestClient}"`
+                              : md.closestClient && md.distanceMeters != null
+                              ? `nearest "${md.closestClient}" at ${md.distanceMeters}m (too far)`
                               : "no client match"}
                           </p>
                         ))}

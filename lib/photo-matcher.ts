@@ -1,9 +1,28 @@
 "use client";
 
+/**
+ * photo-matcher.ts — Photo import, EXIF extraction, and client matching.
+ *
+ * This module handles the full photo-import pipeline:
+ *
+ *   1. EXIF parsing  — Extract timestamp + GPS from JPEG/HEIC photos
+ *   2. Geocoding     — Reverse-geocode GPS coords to street addresses
+ *   3. Client match  — Match photos to clients using a two-tier strategy:
+ *        Tier 1: GPS proximity (photo GPS ↔ client pin, ≤200m = high confidence)
+ *        Tier 2: Address text similarity (reverse-geocoded address ↔ client address)
+ *   4. Event match   — Match photos to recording events by timestamp overlap
+ *   5. Segmentation  — Group unmatched photos by timestamp gaps into segments
+ *
+ * Client matching priority:
+ *   - GPS proximity is always preferred (fast, reliable, no network needed).
+ *   - Address matching is a fallback for clients without map pins.
+ *   - A match requires confidence above threshold (GPS ≤200m, or address score ≥0.5).
+ */
+
 import { AppEvent, Attachment, Client } from "./types";
 import { resizeImage } from "./attachment-store";
 
-// --- GPS / Geocoding types ---
+// ─── GPS / Geocoding types ──────────────────────────────────────────
 
 export interface GpsCoords {
   lat: number;
@@ -33,11 +52,6 @@ export async function getPhotoMetadata(file: File): Promise<PhotoMetadata> {
     // fall through
   }
   return { timestamp: new Date(file.lastModified), gps: null };
-}
-
-// Keep old API for backward compat
-export async function getPhotoTimestamp(file: File): Promise<Date> {
-  return (await getPhotoMetadata(file)).timestamp;
 }
 
 // --- EXIF Parser ---
@@ -284,13 +298,17 @@ function parseExifDateString(s: string): Date | null {
   return new Date(parseInt(y), parseInt(mo) - 1, parseInt(d), parseInt(h), parseInt(mi), parseInt(sec));
 }
 
-// --- Geocoding (Nominatim — free, no API key) ---
+// ─── Geocoding ──────────────────────────────────────────────────────
+// All geocoding uses free, no-API-key providers. Reverse geocoding is
+// used during photo import; forward geocoding is used by the map search.
+// Results are cached in-memory to avoid redundant network requests.
 
 const geocodeCache = new Map<string, string>();
 
 /**
  * Reverse-geocode GPS coordinates to a short address string.
- * Uses OpenStreetMap Nominatim (1 req/sec rate limit).
+ * Returns "123 Main St, City" format. Cached per coordinate (5-decimal precision).
+ * Uses OpenStreetMap Nominatim (1 req/sec rate limit enforced by caller).
  */
 export async function reverseGeocode(coords: GpsCoords): Promise<string | null> {
   const key = `${coords.lat.toFixed(5)},${coords.lng.toFixed(5)}`;
@@ -321,6 +339,9 @@ export async function reverseGeocode(coords: GpsCoords): Promise<string | null> 
 
 /**
  * Forward-geocode an address string to GPS coordinates.
+ * Tries three free providers in order (geocode.maps.co → photon → nominatim).
+ * Returns null if all providers fail or return no results.
+ * Used by the map search overlay for placing client pins.
  */
 export async function forwardGeocode(address: string): Promise<GpsCoords | null> {
   if (!address.trim()) return null;
@@ -381,7 +402,20 @@ export async function forwardGeocode(address: string): Promise<GpsCoords | null>
   return null;
 }
 
-// --- Distance / Client matching ---
+// ─── Distance / Client matching ─────────────────────────────────────
+//
+// Match confidence tiers:
+//   HIGH   — GPS within 200m of client pin (almost certainly the right property)
+//   MEDIUM — GPS within 500m (likely correct, but could be a neighbor)
+//   LOW    — Address text similarity ≥0.5 (best-effort when GPS matching fails)
+//
+// The default GPS radius is 200m. For roofing jobs this covers the property
+// and accounts for typical phone GPS drift (~5-30m). If a client's pin is
+// placed at the correct property, 200m provides very high accuracy without
+// false-matching nearby clients.
+
+/** Maximum GPS distance (meters) for auto-matching photos to clients. */
+export const GPS_MATCH_RADIUS_M = 200;
 
 /**
  * Haversine distance in meters between two GPS coordinates.
@@ -398,13 +432,21 @@ export function haversineMeters(a: GpsCoords, b: GpsCoords): number {
 }
 
 /**
- * Find the closest client to a GPS coordinate, within maxMeters.
- * Clients must have lat/lng set.
+ * Find the closest client to a GPS coordinate within the match radius.
+ *
+ * Only considers clients that have lat/lng set (i.e., pinned on the map).
+ * Default radius is 200m — tight enough to avoid false positives between
+ * neighboring properties, loose enough to handle GPS drift.
+ *
+ * @param coords  - Photo's GPS coordinates
+ * @param clients - All clients (those without lat/lng are skipped)
+ * @param maxMeters - Match radius in meters (default: GPS_MATCH_RADIUS_M)
+ * @returns The closest client within radius, or null
  */
 export function findClosestClient(
   coords: GpsCoords,
   clients: Client[],
-  maxMeters = 2000,
+  maxMeters = GPS_MATCH_RADIUS_M,
 ): Client | null {
   let best: Client | null = null;
   let bestDist = Infinity;
@@ -419,17 +461,26 @@ export function findClosestClient(
   return best;
 }
 
+// ─── Address normalization & similarity ─────────────────────────────
+// Used as a fallback when GPS proximity matching isn't possible
+// (e.g., client has no map pin, or photo has no GPS).
+
+/** Minimum address similarity score (0-1) to consider a match. */
+export const ADDRESS_MATCH_THRESHOLD = 0.5;
+
 /**
- * Normalize an address string for fuzzy comparison.
- * Strips punctuation, lowercases, collapses whitespace, expands common abbreviations.
+ * Normalize an address for comparison.
+ * - Lowercases, strips punctuation, collapses whitespace
+ * - Converts long forms to short: "Street" → "st", "North" → "n", etc.
+ * - This ensures "123 North Main Street" matches "123 N Main St"
  */
 function normalizeAddress(addr: string): string {
   let s = addr.toLowerCase().trim();
-  // Remove punctuation first, collapse whitespace
   s = s.replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
-  // Expand common street-type abbreviations (applied after punctuation removal)
+
+  // Normalize long forms → short forms (canonical direction)
   const abbrevs: [RegExp, string][] = [
-    [/\bstreet\b/g, "st"], // normalize to short form
+    [/\bstreet\b/g, "st"],
     [/\bavenue\b/g, "ave"],
     [/\bboulevard\b/g, "blvd"],
     [/\bdrive\b/g, "dr"],
@@ -451,53 +502,69 @@ function normalizeAddress(addr: string): string {
 }
 
 /**
- * Compute similarity between two addresses using multiple strategies:
- * 1. Token overlap (Jaccard on smaller set)
- * 2. Substring containment (one address contains the other's street)
- * Returns the highest score (0-1).
+ * Score how similar two address strings are (0 = no match, 1 = identical).
+ *
+ * Uses three strategies and returns the highest score:
+ *   1. **Street number + name** — If both start with a house number and the
+ *      number + first street word match, score 0.85. This is the strongest
+ *      signal: "123 Main St, Gary" vs "123 Main Street" should match.
+ *   2. **Token overlap** — Jaccard similarity over the smaller token set.
+ *      Filters single-character tokens to avoid noise from directional
+ *      abbreviations (N/S/E/W) inflating scores.
+ *   3. **Substring containment** — If one normalized address fully contains
+ *      the other, score 0.8.
  */
 export function addressSimilarity(a: string, b: string): number {
   const normA = normalizeAddress(a);
   const normB = normalizeAddress(b);
+
+  // Tokens for comparison — filter out single-char tokens (directional abbrevs)
+  // to avoid "n" matching "s" inflating scores
   const tokensA = new Set(normA.split(" ").filter((t) => t.length > 1));
   const tokensB = new Set(normB.split(" ").filter((t) => t.length > 1));
   if (tokensA.size === 0 || tokensB.size === 0) return 0;
 
-  // Token overlap score
+  // Strategy 1: Street number + name match (strongest signal)
+  const wordsA = normA.split(" ").filter((t) => t.length > 1);
+  const wordsB = normB.split(" ").filter((t) => t.length > 1);
+  let streetScore = 0;
+  if (wordsA.length >= 2 && wordsB.length >= 2) {
+    if (/^\d+$/.test(wordsA[0]) && wordsA[0] === wordsB[0] && wordsA[1] === wordsB[1]) {
+      streetScore = 0.85;
+    }
+  }
+
+  // Strategy 2: Token overlap (Jaccard on smaller set)
   let intersection = 0;
   for (const t of tokensA) {
     if (tokensB.has(t)) intersection++;
   }
-  const minSize = Math.min(tokensA.size, tokensB.size);
-  const tokenScore = intersection / minSize;
+  const tokenScore = intersection / Math.min(tokensA.size, tokensB.size);
 
-  // Substring containment: check if one normalized address contains the other
-  let substringScore = 0;
-  if (normA.includes(normB) || normB.includes(normA)) {
-    substringScore = 0.8;
-  }
+  // Strategy 3: Substring containment
+  const substringScore = (normA.includes(normB) || normB.includes(normA)) ? 0.8 : 0;
 
-  // Check if the street number + name match (first 2-3 tokens)
-  const wordsA = normA.split(" ").filter((t) => t.length > 1);
-  const wordsB = normB.split(" ").filter((t) => t.length > 1);
-  if (wordsA.length >= 2 && wordsB.length >= 2) {
-    // If first token is a number and matches, and second token matches, strong signal
-    if (/^\d+$/.test(wordsA[0]) && wordsA[0] === wordsB[0] && wordsA[1] === wordsB[1]) {
-      substringScore = Math.max(substringScore, 0.7);
-    }
-  }
-
-  return Math.max(tokenScore, substringScore);
+  return Math.max(streetScore, tokenScore, substringScore);
 }
 
 /**
- * Match a reverse-geocoded photo address to a client's address using text similarity.
- * Returns the best-matching client if similarity exceeds threshold.
+ * Find the best client match for a reverse-geocoded photo address.
+ *
+ * Compares the photo's address against all clients' address fields using
+ * text similarity. Only returns a match above ADDRESS_MATCH_THRESHOLD (0.5).
+ *
+ * This is the Tier 2 fallback — used only when GPS proximity matching fails
+ * (client has no map pin, or distance exceeds GPS_MATCH_RADIUS_M).
+ *
+ * @param photoAddress - Reverse-geocoded address from the photo's GPS
+ * @param clients      - All clients to compare against
+ * @param threshold    - Minimum similarity score (default: ADDRESS_MATCH_THRESHOLD)
+ * @returns Best-matching client, or null if no match meets threshold
  */
 export function findClientByAddress(
   photoAddress: string,
   clients: Client[],
-  threshold = 0.4,
+  threshold = ADDRESS_MATCH_THRESHOLD,
 ): Client | null {
   let best: Client | null = null;
   let bestScore = 0;
@@ -552,6 +619,10 @@ export function matchPhotoToEvent(
   return bestMatch;
 }
 
+// ─── Photo segmentation ─────────────────────────────────────────────
+// Photos are grouped into "segments" — contiguous batches taken within
+// a time gap of each other. Each segment represents one visit/stop.
+
 export interface PhotoMatchResult {
   eventId: string;
   eventTitle: string;
@@ -566,16 +637,17 @@ export interface UnmatchedPhoto {
 
 /**
  * A segment of photos grouped by temporal proximity.
- * Photos within `gapMinutes` of each other belong to the same segment.
+ * Photos taken within `gapMinutes` of each other form one segment.
+ * Each segment is reverse-geocoded and matched to a client.
  */
 export interface PhotoSegment {
   attachments: Attachment[];
   startTime: Date;
   endTime: Date;
-  date: string; // YYYY-MM-DD
-  gps: GpsCoords | null; // from first photo with GPS
-  address: string | null; // reverse-geocoded address (filled in by batchMatchPhotos)
-  matchedClient: Client | null; // auto-matched by proximity
+  date: string;                  // YYYY-MM-DD
+  gps: GpsCoords | null;        // From first photo with GPS in the segment
+  address: string | null;        // Reverse-geocoded address (filled by batchMatchPhotos)
+  matchedClient: Client | null;  // Auto-matched client (filled by batchMatchPhotos)
 }
 
 interface RawPhoto {
@@ -585,7 +657,8 @@ interface RawPhoto {
 }
 
 /**
- * Group photos into segments based on timestamp gaps.
+ * Group raw photos into time-based segments.
+ * A new segment starts when the gap between consecutive photos exceeds gapMinutes.
  */
 export function segmentPhotosByTime(
   photos: RawPhoto[],
@@ -631,6 +704,8 @@ function buildSegment(photos: RawPhoto[]): PhotoSegment {
   };
 }
 
+// ─── Batch processing pipeline ──────────────────────────────────────
+
 export interface BatchMatchResult {
   matched: PhotoMatchResult[];
   unmatchedSegments: PhotoSegment[];
@@ -640,14 +715,33 @@ export interface BatchMatchResult {
     gpsTotal: number;
     clientsWithCoords: number;
     clientsTotal: number;
-    matchDetails: { segmentLabel: string; closestClient: string | null; distanceMeters: number | null }[];
+    matchDetails: SegmentDiagnostic[];
   };
 }
 
+interface SegmentDiagnostic {
+  segmentLabel: string;
+  closestClient: string | null;
+  distanceMeters: number | null;
+  matchMethod: "gps" | "address" | null;
+}
+
 /**
- * Process a batch of photo files: extract timestamps + GPS, resize,
- * match to recording events or group into segments.
- * Segments are reverse-geocoded and matched to clients by proximity.
+ * Full photo-import pipeline.
+ *
+ * 1. Read EXIF + resize all photos in parallel
+ * 2. Match each photo to a recording event by timestamp (±bufferMinutes)
+ * 3. Group unmatched photos into time-based segments
+ * 4. For each segment with GPS:
+ *    a. Reverse-geocode to get an address (for event naming)
+ *    b. Try GPS proximity match against pinned clients (Tier 1)
+ *    c. Fall back to address text similarity match (Tier 2)
+ *
+ * @param files         - FileList from an <input type="file"> element
+ * @param events        - Existing recording events to match against
+ * @param gapMinutes    - Max gap between photos in the same segment (default 30)
+ * @param bufferMinutes - Time window around events for timestamp matching (default 15)
+ * @param clients       - Clients to match segments against by location
  */
 export async function batchMatchPhotos(
   files: FileList,
@@ -660,15 +754,13 @@ export async function batchMatchPhotos(
   const unmatchedRaw: RawPhoto[] = [];
   const fileTypes: Record<string, number> = {};
   let gpsFound = 0;
-  let gpsTotal = 0;
 
   const imageFiles = Array.from(files).filter((f) => f.type.startsWith("image/"));
-  gpsTotal = imageFiles.length;
   for (const f of imageFiles) {
     fileTypes[f.type] = (fileTypes[f.type] || 0) + 1;
   }
 
-  // Process all photos in parallel (EXIF + resize)
+  // Step 1: Extract EXIF + resize all photos in parallel
   const processed = await Promise.all(
     imageFiles.map(async (file) => {
       const [meta, dataUrl] = await Promise.all([
@@ -680,6 +772,7 @@ export async function batchMatchPhotos(
     }),
   );
 
+  // Step 2: Match photos to recording events by timestamp
   for (const { file, meta, resized } of processed) {
     if (meta.gps) gpsFound++;
 
@@ -709,50 +802,40 @@ export async function batchMatchPhotos(
     }
   }
 
+  // Step 3: Group unmatched photos into time-based segments
   const segments = segmentPhotosByTime(unmatchedRaw, gapMinutes);
 
   const clientsWithCoords = clients.filter((c) => c.lat != null && c.lng != null).length;
-  const matchDetails: { segmentLabel: string; closestClient: string | null; distanceMeters: number | null }[] = [];
+  const matchDetails: SegmentDiagnostic[] = [];
 
-  // Reverse-geocode segments sequentially (Nominatim 1 req/sec rate limit)
+  // Step 4: Reverse-geocode + client-match each segment
   for (let si = 0; si < segments.length; si++) {
     const seg = segments[si];
     if (!seg.gps) {
-      matchDetails.push({ segmentLabel: "No GPS", closestClient: null, distanceMeters: null });
+      matchDetails.push({ segmentLabel: "No GPS", closestClient: null, distanceMeters: null, matchMethod: null });
       continue;
     }
 
-    // Rate-limit: wait 1.1s between geocode calls (skip first)
+    // Rate-limit reverse geocoding: 1.1s between calls (Nominatim policy)
     if (si > 0) await new Promise((r) => setTimeout(r, 1100));
 
     try {
       seg.address = await reverseGeocode(seg.gps);
-    } catch (err) {
-      console.warn("[photo-matcher] reverseGeocode failed:", err);
+    } catch {
+      // Non-critical: address is nice-to-have for event naming
     }
 
-    console.log(`[photo-matcher] Segment ${si}: GPS=${seg.gps.lat.toFixed(5)},${seg.gps.lng.toFixed(5)} → address="${seg.address}"`);
-
-    // Strategy 1: GPS coordinate matching (if clients have coordinates)
+    // Tier 1: GPS proximity match (preferred — fast, accurate, no network)
     seg.matchedClient = findClosestClient(seg.gps, clients);
+    let matchMethod: "gps" | "address" | null = seg.matchedClient ? "gps" : null;
 
-    // Strategy 2: Text-based address matching (fallback when clients lack coordinates)
+    // Tier 2: Address text similarity (fallback for clients without map pins)
     if (!seg.matchedClient && seg.address) {
       seg.matchedClient = findClientByAddress(seg.address, clients);
-      if (seg.matchedClient) {
-        console.log(`[photo-matcher] Address match: "${seg.address}" → client "${seg.matchedClient.name}" (address: "${seg.matchedClient.address}")`);
-      } else {
-        // Log why no match was found
-        for (const c of clients) {
-          if (c.address) {
-            const score = addressSimilarity(seg.address, c.address);
-            console.log(`[photo-matcher] Address compare: photo="${seg.address}" vs client "${c.name}" addr="${c.address}" → score=${score.toFixed(2)}`);
-          }
-        }
-      }
+      if (seg.matchedClient) matchMethod = "address";
     }
 
-    // Diagnostics
+    // Build diagnostics — find closest pinned client for context
     let closestName: string | null = null;
     let closestDist: number | null = null;
     for (const c of clients) {
@@ -764,19 +847,27 @@ export async function batchMatchPhotos(
       }
     }
     if (!closestName && seg.matchedClient) {
-      closestName = seg.matchedClient.name + " (address match)";
+      closestName = seg.matchedClient.name + " (address)";
     }
     matchDetails.push({
       segmentLabel: seg.address || `${seg.gps.lat.toFixed(4)}, ${seg.gps.lng.toFixed(4)}`,
       closestClient: closestName,
       distanceMeters: closestDist !== null ? Math.round(closestDist) : null,
+      matchMethod,
     });
   }
 
   return {
     matched: Array.from(matched.values()),
     unmatchedSegments: segments,
-    diagnostics: { fileTypes, gpsFound, gpsTotal, clientsWithCoords, clientsTotal: clients.length, matchDetails },
+    diagnostics: {
+      fileTypes,
+      gpsFound,
+      gpsTotal: imageFiles.length,
+      clientsWithCoords,
+      clientsTotal: clients.length,
+      matchDetails,
+    },
   };
 }
 
