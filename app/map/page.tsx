@@ -8,6 +8,7 @@ import { loadClients, updateClient } from "@/lib/clients";
 import { forwardGeocode } from "@/lib/photo-matcher";
 import { getLastName } from "@/lib/utils";
 import { STATUS_PIN_COLORS, DEFAULT_PIN_COLOR } from "@/lib/map-utils";
+import MapSearchOverlay from "@/components/MapSearchOverlay";
 
 const MapView = dynamic(() => import("@/components/MapView"), { ssr: false });
 
@@ -23,6 +24,8 @@ export default function MapPage() {
   const [sortMode, setSortMode] = useState<SortMode>("alpha");
   const [mounted, setMounted] = useState(false);
   const [geocodeStatus, setGeocodeStatus] = useState<string | null>(null);
+  const [previewCoords, setPreviewCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [showSearch, setShowSearch] = useState(false);
   const geocodingRef = useRef(false);
 
   useEffect(() => {
@@ -121,6 +124,8 @@ export default function MapPage() {
   const handleStartPlacing = useCallback((clientId: string) => {
     setPlacingClientId(clientId);
     setSelectedClientId(clientId);
+    setPreviewCoords(null);
+    setShowSearch(true);
   }, []);
 
   // Place a client on the map, then auto-advance to next unmapped client
@@ -128,6 +133,7 @@ export default function MapPage() {
     updateClient(clientId, { lat, lng });
     const refreshed = loadClients();
     setClients(refreshed);
+    setPreviewCoords(null);
 
     // Find next unmapped client and auto-advance
     const unmapped = refreshed.filter(
@@ -136,15 +142,26 @@ export default function MapPage() {
     if (unmapped.length > 0) {
       setPlacingClientId(unmapped[0].id);
       setSelectedClientId(unmapped[0].id);
+      setShowSearch(true);
     } else {
       setPlacingClientId(null);
+      setShowSearch(false);
     }
   }, []);
 
   // Cancel placing mode
   const handleCancelPlacing = useCallback(() => {
     setPlacingClientId(null);
+    setPreviewCoords(null);
+    setShowSearch(false);
   }, []);
+
+  // Confirm the preview pin location
+  const handleConfirmPreview = useCallback(() => {
+    if (placingClientId && previewCoords) {
+      handlePlaceClient(placingClientId, previewCoords.lat, previewCoords.lng);
+    }
+  }, [placingClientId, previewCoords, handlePlaceClient]);
 
   if (!mounted) return null;
 
@@ -206,11 +223,14 @@ export default function MapPage() {
                 const unmapped = clients.filter(
                   (c) => c.id !== placingClientId && c.lat == null && c.lng == null,
                 );
+                setPreviewCoords(null);
                 if (unmapped.length > 0) {
                   setPlacingClientId(unmapped[0].id);
                   setSelectedClientId(unmapped[0].id);
+                  setShowSearch(true);
                 } else {
                   setPlacingClientId(null);
+                  setShowSearch(false);
                 }
               }}
               className="text-[10px] px-2.5 py-0.5 rounded border border-blue-300 text-blue-600 hover:bg-blue-100 active:scale-95 font-medium"
@@ -304,6 +324,8 @@ export default function MapPage() {
                     if (unmapped.length > 0) {
                       setPlacingClientId(unmapped[0].id);
                       setSelectedClientId(unmapped[0].id);
+                      setPreviewCoords(null);
+                      setShowSearch(true);
                     }
                   }}
                   className="text-[10px] px-2 py-0.5 rounded bg-blue-500 text-white hover:bg-blue-600 active:scale-95 font-medium"
@@ -402,7 +424,19 @@ export default function MapPage() {
             onSelectClient={handleSelectClient}
             placingClientId={placingClientId}
             onPlaceClient={handlePlaceClient}
+            previewCoords={previewCoords}
+            onPreviewCoordsChange={setPreviewCoords}
           />
+          {showSearch && placingClient && (
+            <MapSearchOverlay
+              clientName={placingClient.name}
+              clientAddress={placingClient.address || ""}
+              previewCoords={previewCoords}
+              onCoordsFound={setPreviewCoords}
+              onConfirm={handleConfirmPreview}
+              onTapInstead={() => setShowSearch(false)}
+            />
+          )}
         </div>
       </div>
     </div>

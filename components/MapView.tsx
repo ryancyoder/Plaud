@@ -16,6 +16,8 @@ interface MapViewProps {
   onSelectClient: (id: string | null) => void;
   placingClientId: string | null;
   onPlaceClient: (clientId: string, lat: number, lng: number) => void;
+  previewCoords: { lat: number; lng: number } | null;
+  onPreviewCoordsChange: (coords: { lat: number; lng: number } | null) => void;
 }
 
 export default function MapView({
@@ -24,14 +26,19 @@ export default function MapView({
   onSelectClient,
   placingClientId,
   onPlaceClient,
+  previewCoords,
+  onPreviewCoordsChange,
 }: MapViewProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const markersRef = useRef<Map<string, L.Marker>>(new Map());
   const leafletRef = useRef<typeof import("leaflet") | null>(null);
   const placingRef = useRef<string | null>(null);
+  const previewMarkerRef = useRef<L.Marker | null>(null);
   const onPlaceRef = useRef(onPlaceClient);
   onPlaceRef.current = onPlaceClient;
+  const onPreviewCoordsChangeRef = useRef(onPreviewCoordsChange);
+  onPreviewCoordsChangeRef.current = onPreviewCoordsChange;
 
   // Keep placing ref in sync
   useEffect(() => {
@@ -135,6 +142,50 @@ export default function MapView({
     if (!container) return;
     container.style.cursor = placingClientId ? "crosshair" : "";
   }, [placingClientId]);
+
+  // Manage preview marker (draggable)
+  useEffect(() => {
+    const L = leafletRef.current;
+    const map = mapRef.current;
+
+    // Remove old preview marker
+    if (previewMarkerRef.current) {
+      previewMarkerRef.current.remove();
+      previewMarkerRef.current = null;
+    }
+
+    if (!L || !map || !previewCoords) return;
+
+    const icon = L.icon({
+      iconUrl: pinSvgDataUrl("#3B82F6", true),
+      iconSize: [36, 47],
+      iconAnchor: [18, 47],
+      popupAnchor: [0, -36],
+    });
+
+    const marker = L.marker([previewCoords.lat, previewCoords.lng], {
+      icon,
+      draggable: true,
+      zIndexOffset: 1000,
+    })
+      .bindTooltip("Drag to adjust", { direction: "top", offset: [0, -47], permanent: true })
+      .addTo(map);
+
+    marker.on("dragend", () => {
+      const pos = marker.getLatLng();
+      onPreviewCoordsChangeRef.current({ lat: pos.lat, lng: pos.lng });
+    });
+
+    previewMarkerRef.current = marker;
+    map.flyTo([previewCoords.lat, previewCoords.lng], 15, { duration: 0.8 });
+
+    return () => {
+      if (previewMarkerRef.current) {
+        previewMarkerRef.current.remove();
+        previewMarkerRef.current = null;
+      }
+    };
+  }, [previewCoords]);
 
   function addMarkers(
     L: typeof import("leaflet"),
