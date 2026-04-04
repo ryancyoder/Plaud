@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Client, ClientStatus, CLIENT_STATUSES, Transcript } from "@/lib/types";
-import { loadClients, saveClients, updateClientStatus } from "@/lib/clients";
+import { loadClients, saveClients, updateClientStatus, deleteClient } from "@/lib/clients";
 import { loadTranscripts } from "@/lib/store";
 import { getTranscriptsForClient } from "@/lib/clients";
 import { parseRfpClipboard, rfpToClientData } from "@/lib/rfp-parser";
@@ -280,6 +280,11 @@ export default function BoardPage() {
           <ClientViewer
             client={selectedClient}
             transcripts={clientTranscripts}
+            onDelete={(id) => {
+              deleteClient(id);
+              setClients((prev) => prev.filter((c) => c.id !== id));
+              setSelectedClient(null);
+            }}
           />
         ) : (
           <div className="flex items-center justify-center h-full text-sm text-gray-300">
@@ -300,7 +305,7 @@ export default function BoardPage() {
 
 // --- Client Viewer ---
 
-function ClientViewer({ client, transcripts }: { client: Client; transcripts: Transcript[] }) {
+function ClientViewer({ client, transcripts, onDelete }: { client: Client; transcripts: Transcript[]; onDelete: (id: string) => void }) {
   const sorted = [...transcripts].sort((a, b) => b.date.localeCompare(a.date) || b.startTime.localeCompare(a.startTime));
   const totalDuration = transcripts.reduce((s, t) => s + t.duration, 0);
   const statusInfo = CLIENT_STATUSES.find((s) => s.key === (client.status || "lead"));
@@ -315,10 +320,25 @@ function ClientViewer({ client, transcripts }: { client: Client; transcripts: Tr
           }`}>
             {client.name.charAt(0).toUpperCase()}
           </div>
-          <div>
+          <div className="flex-1 min-w-0">
             <h2 className="text-sm font-bold">{client.name}</h2>
             {client.company && <p className="text-[10px] text-muted">{client.company}</p>}
           </div>
+          <button
+            onClick={() => {
+              if (window.confirm(`Delete "${client.name}"?`)) onDelete(client.id);
+            }}
+            className="p-1.5 text-gray-300 hover:text-red-500 rounded-lg hover:bg-red-50 shrink-0"
+            title="Delete client"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="3 6 5 6 21 6" />
+              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+              <path d="M10 11v6" />
+              <path d="M14 11v6" />
+              <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+            </svg>
+          </button>
         </div>
 
         <div className="space-y-3">
