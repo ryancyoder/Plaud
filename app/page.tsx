@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
+import Link from "next/link";
 import { Transcript, Attachment, Client } from "@/lib/types";
 import { getWeekDates } from "@/lib/mock-data";
 import { loadTranscripts, saveTranscripts } from "@/lib/store";
@@ -339,6 +340,12 @@ export default function Dashboard() {
             </svg>
           </div>
           <h1 className="text-base font-bold tracking-tight">Plaud</h1>
+          <Link
+            href="/board"
+            className="ml-2 px-2.5 py-1 rounded-lg text-[10px] font-medium text-muted border border-border hover:bg-gray-50 active:scale-95"
+          >
+            Board
+          </Link>
         </div>
 
         {/* Week navigation */}

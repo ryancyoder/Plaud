@@ -1,6 +1,6 @@
 "use client";
 
-import { Client, Transcript } from "./types";
+import { Client, ClientStatus, Transcript } from "./types";
 
 const CLIENTS_KEY = "plaud-clients";
 
@@ -38,6 +38,15 @@ export function addClient(name: string, company?: string, type: "client" | "cont
 export function deleteClient(id: string): void {
   const clients = loadClients().filter((c) => c.id !== id);
   saveClients(clients);
+}
+
+export function updateClientStatus(id: string, status: ClientStatus): void {
+  const clients = loadClients();
+  const client = clients.find((c) => c.id === id);
+  if (client) {
+    client.status = status;
+    saveClients(clients);
+  }
 }
 
 export function updateClient(id: string, updates: Partial<Pick<Client, "name" | "company" | "type">>): void {
