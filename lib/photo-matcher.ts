@@ -363,7 +363,7 @@ export function haversineMeters(a: GpsCoords, b: GpsCoords): number {
 export function findClosestClient(
   coords: GpsCoords,
   clients: Client[],
-  maxMeters = 500,
+  maxMeters = 2000,
 ): Client | null {
   let best: Client | null = null;
   let bestDist = Infinity;

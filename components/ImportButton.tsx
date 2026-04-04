@@ -73,7 +73,7 @@ export default function ImportButton({
     createdEvents: AppEvent[];
     segments: PhotoSegment[];
     totalFiles: number;
-    diagnostics: { fileTypes: Record<string, number>; gpsFound: number; gpsTotal: number; clientsWithCoords: number; clientsTotal: number; matchDetails: { segmentLabel: string; closestClient: string | null; distanceMeters: number | null }[] };
+    diagnostics: { fileTypes: Record<string, number>; gpsFound: number; gpsTotal: number; clientsWithCoords: number; clientsTotal: number; clientsGeocoded: number; matchDetails: { segmentLabel: string; closestClient: string | null; distanceMeters: number | null }[] };
   } | null>(null);
   const [pendingImageFiles, setPendingImageFiles] = useState<FileList | null>(null);
   const [fallbackLocation, setFallbackLocation] = useState<GpsCoords | null>(null);
@@ -184,7 +184,7 @@ export default function ImportButton({
         createdEvents: created,
         segments: result.unmatchedSegments,
         totalFiles: pendingImageFiles.length,
-        diagnostics: result.diagnostics,
+        diagnostics: { ...result.diagnostics, clientsGeocoded: geocoded },
       });
       setPhotoStep("results");
     } catch (err) {
@@ -693,14 +693,14 @@ export default function ImportButton({
                       GPS extracted: {photoResults.diagnostics.gpsFound} of {photoResults.diagnostics.gpsTotal} photos
                     </p>
                     <p className="text-[10px] text-gray-500">
-                      Clients with coordinates: {photoResults.diagnostics.clientsWithCoords} of {photoResults.diagnostics.clientsTotal}
+                      Clients geocoded this run: {photoResults.diagnostics.clientsGeocoded} | Total with coords: {photoResults.diagnostics.clientsWithCoords} of {photoResults.diagnostics.clientsTotal}
                     </p>
                     {photoResults.diagnostics.matchDetails.length > 0 && (
                       <div className="mt-1 space-y-0.5">
                         {photoResults.diagnostics.matchDetails.map((md, i) => (
                           <p key={i} className="text-[10px] text-gray-500">
                             {md.segmentLabel}: {md.closestClient
-                              ? `nearest client "${md.closestClient}" at ${md.distanceMeters}m${md.distanceMeters! <= 500 ? " (matched)" : " (>500m, not matched)"}`
+                              ? `nearest client "${md.closestClient}" at ${md.distanceMeters}m${md.distanceMeters! <= 2000 ? " (matched)" : " (>2km, not matched)"}`
                               : "no geocoded clients to compare"}
                           </p>
                         ))}
