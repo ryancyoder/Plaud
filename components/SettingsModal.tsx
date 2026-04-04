@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   getApiKey,
   setApiKey,
@@ -14,6 +14,16 @@ import {
   PromptTemplates,
   ApiLogEntry,
 } from "@/lib/claude-api";
+import {
+  loadAllAttachments,
+  saveAttachments,
+  clearAllAttachments,
+  loadPendingPhotos,
+  savePendingPhotos,
+  clearPendingPhotos,
+  PendingPhoto,
+} from "@/lib/attachment-store";
+import type { Attachment } from "@/lib/types";
 
 type SettingsTab = "api-key" | "api-log" | "prompts" | "data";
 
@@ -356,93 +366,233 @@ const BACKUP_KEYS = [
 
 function DataTab() {
   const [importStatus, setImportStatus] = useState<{ message: string; error?: boolean } | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [exportProgress, setExportProgress] = useState<string | null>(null);
+  const [importProgress, setImportProgress] = useState<string | null>(null);
+  const [storageInfo, setStorageInfo] = useState<{ localStorage: string; attachments: number; pending: number } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  function handleExport() {
-    const backup: Record<string, unknown> = {
-      _meta: {
-        version: 1,
-        exportedAt: new Date().toISOString(),
-        app: "plaud-transcripts",
-      },
-    };
-    for (const key of BACKUP_KEYS) {
-      const val = localStorage.getItem(key);
-      if (val !== null) {
-        try {
-          backup[key] = JSON.parse(val);
-        } catch {
-          backup[key] = val;
+  // Calculate storage usage on mount
+  useEffect(() => {
+    (async () => {
+      let lsSize = 0;
+      for (const key of BACKUP_KEYS) {
+        const val = localStorage.getItem(key);
+        if (val) lsSize += val.length * 2; // rough bytes (UTF-16)
+      }
+      try {
+        const atts = await loadAllAttachments();
+        const attCount = Object.values(atts).reduce((n, arr) => n + arr.length, 0);
+        const pending = await loadPendingPhotos();
+        setStorageInfo({
+          localStorage: formatBytes(lsSize),
+          attachments: attCount,
+          pending: pending.length,
+        });
+      } catch {
+        setStorageInfo({ localStorage: formatBytes(lsSize), attachments: 0, pending: 0 });
+      }
+    })();
+  }, []);
+
+  async function handleExport() {
+    setExporting(true);
+    setExportProgress("Gathering settings and events...");
+    setImportStatus(null);
+
+    try {
+      // 1. Gather localStorage data
+      const backup: Record<string, unknown> = {
+        _meta: {
+          version: 2,
+          exportedAt: new Date().toISOString(),
+          app: "plaud-transcripts",
+        },
+      };
+      for (const key of BACKUP_KEYS) {
+        const val = localStorage.getItem(key);
+        if (val !== null) {
+          try { backup[key] = JSON.parse(val); } catch { backup[key] = val; }
         }
       }
+
+      // 2. Gather IndexedDB attachments
+      setExportProgress("Reading photos and documents...");
+      const allAttachments = await loadAllAttachments();
+      const attCount = Object.values(allAttachments).reduce((n, arr) => n + arr.length, 0);
+      if (attCount > 0) {
+        backup["_attachments"] = allAttachments;
+        setExportProgress(`Packaging ${attCount} attachment${attCount !== 1 ? "s" : ""}...`);
+      }
+
+      // 3. Gather pending photos
+      const pending = await loadPendingPhotos();
+      if (pending.length > 0) {
+        backup["_pendingPhotos"] = pending;
+      }
+
+      // 4. Build and download the file
+      setExportProgress("Creating backup file...");
+      const json = JSON.stringify(backup);
+      const sizeMB = (json.length / 1024 / 1024).toFixed(1);
+      const blob = new Blob([json], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `plaud-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+
+      setExportProgress(null);
+      setImportStatus({
+        message: `Backup exported (${sizeMB} MB, ${attCount} attachment${attCount !== 1 ? "s" : ""}).`,
+      });
+    } catch (err) {
+      setImportStatus({
+        message: `Export failed: ${err instanceof Error ? err.message : "unknown error"}`,
+        error: true,
+      });
+      setExportProgress(null);
+    } finally {
+      setExporting(false);
     }
-    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `plaud-backup-${new Date().toISOString().slice(0, 10)}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
   }
 
-  function handleImport() {
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = ".json";
-    input.onchange = () => {
-      const file = input.files?.[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = () => {
-        try {
-          const data = JSON.parse(reader.result as string);
-          if (!data._meta) {
-            setImportStatus({ message: "Invalid backup file — missing metadata.", error: true });
-            return;
-          }
-          let count = 0;
-          for (const key of BACKUP_KEYS) {
-            if (key in data) {
-              const val = data[key];
-              localStorage.setItem(key, typeof val === "string" ? val : JSON.stringify(val));
-              count++;
-            }
-          }
-          setImportStatus({ message: `Restored ${count} data entries. Reload the page to see changes.` });
-        } catch {
-          setImportStatus({ message: "Failed to parse backup file.", error: true });
+  async function handleImport() {
+    fileInputRef.current?.click();
+  }
+
+  async function processImportFile(file: File) {
+    setImporting(true);
+    setImportProgress("Reading backup file...");
+    setImportStatus(null);
+
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+
+      if (!data._meta) {
+        setImportStatus({ message: "Invalid backup file — missing metadata.", error: true });
+        return;
+      }
+
+      // 1. Restore localStorage
+      setImportProgress("Restoring settings and events...");
+      let lsCount = 0;
+      for (const key of BACKUP_KEYS) {
+        if (key in data) {
+          const val = data[key];
+          localStorage.setItem(key, typeof val === "string" ? val : JSON.stringify(val));
+          lsCount++;
         }
-      };
-      reader.readAsText(file);
-    };
-    input.click();
+      }
+
+      // 2. Restore IndexedDB attachments
+      let attCount = 0;
+      if (data._attachments && typeof data._attachments === "object") {
+        const attachmentMap = data._attachments as Record<string, Attachment[]>;
+        const entries = Object.entries(attachmentMap);
+        setImportProgress(`Restoring attachments (0/${entries.length} events)...`);
+
+        await clearAllAttachments();
+        for (let i = 0; i < entries.length; i++) {
+          const [transcriptId, atts] = entries[i];
+          await saveAttachments(transcriptId, atts);
+          attCount += atts.length;
+          if (i % 5 === 0) {
+            setImportProgress(`Restoring attachments (${i + 1}/${entries.length} events)...`);
+          }
+        }
+      }
+
+      // 3. Restore pending photos
+      let pendingCount = 0;
+      if (data._pendingPhotos && Array.isArray(data._pendingPhotos)) {
+        setImportProgress("Restoring pending photos...");
+        await clearPendingPhotos();
+        await savePendingPhotos(data._pendingPhotos as PendingPhoto[]);
+        pendingCount = data._pendingPhotos.length;
+      }
+
+      setImportProgress(null);
+      const parts = [`${lsCount} data entries`];
+      if (attCount > 0) parts.push(`${attCount} attachments`);
+      if (pendingCount > 0) parts.push(`${pendingCount} pending photos`);
+      setImportStatus({
+        message: `Restored ${parts.join(", ")}. Reload the page to see changes.`,
+      });
+    } catch {
+      setImportStatus({ message: "Failed to parse backup file.", error: true });
+      setImportProgress(null);
+    } finally {
+      setImporting(false);
+    }
   }
 
   return (
     <div className="p-5 space-y-5">
+      {/* Storage info */}
+      {storageInfo && (
+        <div className="grid grid-cols-3 gap-2 mb-1">
+          <div className="bg-gray-50 rounded-lg p-2.5 text-center">
+            <div className="text-sm font-bold">{storageInfo.localStorage}</div>
+            <div className="text-[10px] text-muted">Settings & Events</div>
+          </div>
+          <div className="bg-gray-50 rounded-lg p-2.5 text-center">
+            <div className="text-sm font-bold">{storageInfo.attachments}</div>
+            <div className="text-[10px] text-muted">Photos & Docs</div>
+          </div>
+          <div className="bg-gray-50 rounded-lg p-2.5 text-center">
+            <div className="text-sm font-bold">{storageInfo.pending}</div>
+            <div className="text-[10px] text-muted">Pending Photos</div>
+          </div>
+        </div>
+      )}
+
       <div>
-        <h3 className="text-xs font-semibold mb-1">Export Backup</h3>
+        <h3 className="text-xs font-semibold mb-1">Export Full Backup</h3>
         <p className="text-[10px] text-muted mb-3">
-          Download all app data (clients, transcripts, summaries, settings) as a JSON file.
+          Download everything — clients, events, transcripts, photos, documents, and settings — as a single file. This may take a moment if you have many photos.
         </p>
         <button
           onClick={handleExport}
-          className="px-4 py-2 rounded-lg text-sm font-medium bg-accent text-white hover:bg-blue-600 active:scale-[0.98]"
+          disabled={exporting}
+          className="px-4 py-2 rounded-lg text-sm font-medium bg-accent text-white hover:bg-blue-600 active:scale-[0.98] disabled:opacity-50"
         >
-          Export Backup
+          {exporting ? "Exporting..." : "Export Backup"}
         </button>
+        {exportProgress && (
+          <p className="text-[10px] text-muted mt-2 animate-pulse">{exportProgress}</p>
+        )}
       </div>
 
       <div className="pt-3 border-t border-border">
         <h3 className="text-xs font-semibold mb-1">Import Backup</h3>
         <p className="text-[10px] text-muted mb-3">
-          Restore from a previously exported backup file. This will overwrite current data.
+          Restore from a previously exported backup file. This will overwrite current data including all photos and documents.
         </p>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".json"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) processImportFile(f);
+            e.target.value = "";
+          }}
+        />
         <button
           onClick={handleImport}
-          className="px-4 py-2 rounded-lg text-sm font-medium text-muted border border-border hover:bg-gray-100 active:scale-[0.98]"
+          disabled={importing}
+          className="px-4 py-2 rounded-lg text-sm font-medium text-muted border border-border hover:bg-gray-100 active:scale-[0.98] disabled:opacity-50"
         >
-          Import Backup
+          {importing ? "Importing..." : "Import Backup"}
         </button>
+        {importProgress && (
+          <p className="text-[10px] text-muted mt-2 animate-pulse">{importProgress}</p>
+        )}
         {importStatus && (
           <p className={`text-[10px] mt-2 ${importStatus.error ? "text-red-500" : "text-green-600"}`}>
             {importStatus.message}
@@ -451,4 +601,10 @@ function DataTab() {
       </div>
     </div>
   );
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
