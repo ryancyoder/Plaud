@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
-import { AppEvent, Attachment, Client, CLIENT_STATUSES } from "@/lib/types";
+import { AppEvent, Attachment, Client } from "@/lib/types";
 import { formatDuration, getTagColor, formatDate } from "@/lib/utils";
 import { hasApiKey, getCachedSegmentSummary, generateSegmentSummary, getCachedSummary, generateDailySummary } from "@/lib/claude-api";
 import PdfViewer from "@/components/PdfViewer";
@@ -99,9 +99,6 @@ export default function ViewerPanel({
         ))}
       </div>
 
-      {/* Collapsible client info banner */}
-      {(activeClient || selectedClient) && <ClientInfoBanner client={(activeClient || selectedClient)!} />}
-
       <div className={`flex-1 ${activeTab === "scratchpad" ? "overflow-hidden flex flex-col" : "overflow-y-auto"}`}>
         {activeTab === "transcript" && (
           <>
@@ -154,96 +151,6 @@ export default function ViewerPanel({
           />
         )}
       </div>
-    </div>
-  );
-}
-
-// --- Collapsible Client Info Banner ---
-
-function ClientInfoBanner({ client }: { client: Client }) {
-  const [expanded, setExpanded] = useState(false);
-  const statusInfo = CLIENT_STATUSES.find((s) => s.key === (client.status || "lead"));
-
-  const hasDetails = !!(client.phone || client.email || client.address || client.notes || client.appointmentDate);
-
-  return (
-    <div className="shrink-0 border-b border-border bg-gray-50/80">
-      <button
-        onClick={() => setExpanded((v) => !v)}
-        className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-gray-100/60 active:bg-gray-100"
-      >
-        <div className="flex-1 min-w-0 flex items-center gap-2">
-          <span className="text-xs font-semibold truncate">{client.name}</span>
-          {client.company && <span className="text-[10px] text-muted truncate">{client.company}</span>}
-          {statusInfo && (
-            <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded-full border shrink-0 ${statusInfo.color}`}>
-              {statusInfo.label}
-            </span>
-          )}
-        </div>
-        <svg
-          width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
-          className={`shrink-0 text-muted transition-transform ${expanded ? "rotate-180" : ""}`}
-        >
-          <polyline points="6 9 12 15 18 9" />
-        </svg>
-      </button>
-
-      {expanded && hasDetails && (
-        <div className="px-3 pb-2 pt-0.5 grid grid-cols-2 gap-x-4 gap-y-1.5">
-          {client.phone && (
-            <div>
-              <span className="text-[9px] font-semibold uppercase text-muted">Phone</span>
-              <p className="text-[11px]">{client.phone}</p>
-            </div>
-          )}
-          {client.email && (
-            <div>
-              <span className="text-[9px] font-semibold uppercase text-muted">Email</span>
-              <p className="text-[11px] break-all">{client.email}</p>
-            </div>
-          )}
-          {client.address && (
-            <div className="col-span-2">
-              <div className="flex items-center gap-2">
-                <span className="text-[9px] font-semibold uppercase text-muted">Address</span>
-                <a
-                  href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(client.address)}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-[9px] text-accent hover:underline"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  Open in Maps
-                </a>
-              </div>
-              <p className="text-[11px]">{client.address}</p>
-            </div>
-          )}
-          {client.appointmentDate && (
-            <div>
-              <span className="text-[9px] font-semibold uppercase text-muted">Appointment</span>
-              <p className="text-[11px]">
-                {(() => {
-                  try {
-                    const d = new Date(client.appointmentDate);
-                    return isNaN(d.getTime()) ? client.appointmentDate : d.toLocaleString("en-US", {
-                      weekday: "short", month: "short", day: "numeric",
-                      hour: "numeric", minute: "2-digit",
-                    });
-                  } catch { return client.appointmentDate; }
-                })()}
-              </p>
-            </div>
-          )}
-          {client.notes && (
-            <div className="col-span-2">
-              <span className="text-[9px] font-semibold uppercase text-muted">Notes</span>
-              <p className="text-[11px] leading-relaxed whitespace-pre-wrap text-gray-700 max-h-20 overflow-y-auto">{client.notes}</p>
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 }
