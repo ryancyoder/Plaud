@@ -324,23 +324,61 @@ export async function reverseGeocode(coords: GpsCoords): Promise<string | null> 
  */
 export async function forwardGeocode(address: string): Promise<GpsCoords | null> {
   if (!address.trim()) return null;
+
+  // Strategy 1: geocode.maps.co (free, CORS-friendly)
   try {
-    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json&limit=1`;
-    const resp = await fetch(url);
-    if (!resp.ok) {
-      console.warn(`[forwardGeocode] HTTP ${resp.status} for "${address}"`);
-      return null;
+    const url1 = `https://geocode.maps.co/search?q=${encodeURIComponent(address)}&format=json&limit=1`;
+    const resp1 = await fetch(url1);
+    if (resp1.ok) {
+      const results = await resp1.json();
+      if (results.length > 0) {
+        console.log(`[forwardGeocode] maps.co success for "${address}"`);
+        return { lat: parseFloat(results[0].lat), lng: parseFloat(results[0].lon || results[0].lng) };
+      }
+    } else {
+      console.warn(`[forwardGeocode] maps.co HTTP ${resp1.status}`);
     }
-    const results = await resp.json();
-    if (results.length === 0) {
-      console.warn(`[forwardGeocode] No results for "${address}"`);
-      return null;
-    }
-    return { lat: parseFloat(results[0].lat), lng: parseFloat(results[0].lng) };
   } catch (err) {
-    console.warn(`[forwardGeocode] Error for "${address}":`, err);
-    return null;
+    console.warn(`[forwardGeocode] maps.co error:`, err);
   }
+
+  // Strategy 2: photon.komoot.io (OSM-based, free, no key)
+  try {
+    const url2 = `https://photon.komoot.io/api/?q=${encodeURIComponent(address)}&limit=1`;
+    const resp2 = await fetch(url2);
+    if (resp2.ok) {
+      const data = await resp2.json();
+      if (data.features?.length > 0) {
+        const [lng, lat] = data.features[0].geometry.coordinates;
+        console.log(`[forwardGeocode] photon success for "${address}"`);
+        return { lat, lng };
+      }
+    } else {
+      console.warn(`[forwardGeocode] photon HTTP ${resp2.status}`);
+    }
+  } catch (err) {
+    console.warn(`[forwardGeocode] photon error:`, err);
+  }
+
+  // Strategy 3: Nominatim (last resort)
+  try {
+    const url3 = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json&limit=1`;
+    const resp3 = await fetch(url3);
+    if (resp3.ok) {
+      const results = await resp3.json();
+      if (results.length > 0) {
+        console.log(`[forwardGeocode] nominatim success for "${address}"`);
+        return { lat: parseFloat(results[0].lat), lng: parseFloat(results[0].lon) };
+      }
+    } else {
+      console.warn(`[forwardGeocode] nominatim HTTP ${resp3.status}`);
+    }
+  } catch (err) {
+    console.warn(`[forwardGeocode] nominatim error:`, err);
+  }
+
+  console.warn(`[forwardGeocode] All providers failed for "${address}"`);
+  return null;
 }
 
 // --- Distance / Client matching ---
