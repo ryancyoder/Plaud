@@ -5,6 +5,7 @@ import { importParsedSegments, importFromText, addEvent } from "@/lib/event-stor
 import { srtToSegments, ParsedTranscript } from "@/lib/srt-parser";
 import { AppEvent, Attachment, Client } from "@/lib/types";
 import { batchMatchPhotos, PhotoMatchResult, PhotoSegment, GpsCoords, reverseGeocode, findClosestClient, findClientByAddress } from "@/lib/photo-matcher";
+import { getLastName } from "@/lib/utils";
 import { saveAttachments as dbSaveAttachments } from "@/lib/attachment-store";
 
 interface ImportButtonProps {
@@ -215,9 +216,11 @@ export default function ImportButton({
           hour: "numeric",
           minute: "2-digit",
         });
-        const count = seg.attachments.length;
-        const locationLabel = seg.address || timeStr;
-        const label = `${count} Photo${count !== 1 ? "s" : ""} — ${locationLabel}`;
+        const clientLastName = seg.matchedClient ? getLastName(seg.matchedClient.name) : null;
+        const addressLabel = seg.matchedClient?.address || seg.address || null;
+        const label = clientLastName && addressLabel
+          ? `${clientLastName} - ${addressLabel}`
+          : clientLastName || addressLabel || timeStr;
 
         const strippedAtts: Attachment[] = seg.attachments.map(({ dataUrl, ...rest }) => ({ ...rest, dataUrl: "" }));
 
