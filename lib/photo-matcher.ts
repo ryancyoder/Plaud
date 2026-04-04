@@ -17,20 +17,39 @@ export interface PhotoMetadata {
 
 /**
  * Extract timestamp and GPS from a photo file.
- * Tries EXIF first, falls back to file.lastModified for timestamp.
+ * Supports JPEG (direct EXIF) and HEIC/HEIF (EXIF embedded in ISOBMFF).
+ * Falls back to file.lastModified for timestamp.
  */
 export async function getPhotoMetadata(file: File): Promise<PhotoMetadata> {
-  if (file.type === "image/jpeg" || file.type === "image/jpg") {
-    try {
-      const exif = await readExifData(file);
+  try {
+    // Try JPEG EXIF first (also works for JPEG-converted HEIC)
+    const exif = await readExifData(file);
+    if (exif.date || exif.gps) {
       return {
         timestamp: exif.date || new Date(file.lastModified),
         gps: exif.gps,
       };
+    }
+  } catch {
+    // fall through
+  }
+
+  // Try HEIC/HEIF ISOBMFF container
+  if (file.type === "image/heic" || file.type === "image/heif" ||
+      file.name.toLowerCase().endsWith(".heic") || file.name.toLowerCase().endsWith(".heif")) {
+    try {
+      const exif = await readHeicExif(file);
+      if (exif.date || exif.gps) {
+        return {
+          timestamp: exif.date || new Date(file.lastModified),
+          gps: exif.gps,
+        };
+      }
     } catch {
       // fall through
     }
   }
+
   return { timestamp: new Date(file.lastModified), gps: null };
 }
 
@@ -99,6 +118,63 @@ async function readExifData(file: File): Promise<ExifData> {
       offset += 2 + segLen;
     } else {
       break;
+    }
+  }
+  return { date: null, gps: null };
+}
+
+/**
+ * Extract EXIF from HEIC/HEIF files (ISOBMFF container).
+ * Scans for the "Exif" marker in the binary data — HEIC stores EXIF as
+ * a standard TIFF payload inside an 'Exif' item property box.
+ */
+async function readHeicExif(file: File): Promise<ExifData> {
+  // Read more for HEIC since the EXIF box can be deeper in the file
+  const buffer = await file.slice(0, 512 * 1024).arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+
+  // Scan for "Exif\0\0" followed by TIFF header ("II" or "MM")
+  for (let i = 0; i < bytes.length - 14; i++) {
+    if (bytes[i] === 0x45 && bytes[i + 1] === 0x78 &&
+        bytes[i + 2] === 0x69 && bytes[i + 3] === 0x66 &&
+        bytes[i + 4] === 0x00 && bytes[i + 5] === 0x00) {
+      // Found "Exif\0\0" — TIFF header starts right after
+      const tiffStart = i + 6;
+      const view = new DataView(buffer, tiffStart);
+      if (view.byteLength < 8) continue;
+
+      const byteOrder = view.getUint16(0);
+      if (byteOrder !== 0x4949 && byteOrder !== 0x4d4d) continue;
+      const le = byteOrder === 0x4949;
+
+      const magic = view.getUint16(2, le);
+      if (magic !== 42) continue;
+
+      // Valid TIFF header — parse it using our existing helpers
+      // Create a view for the entire tiff block
+      const tiffView = new DataView(buffer);
+      const ifdOffset = view.getUint32(4, le);
+      const ifd0Start = tiffStart + ifdOffset;
+
+      let date: Date | null = null;
+      const dateStr = findDateInIFD(tiffView, tiffStart, ifd0Start, le);
+      if (dateStr) date = parseExifDateString(dateStr);
+
+      if (!date) {
+        const exifIfdOff = findTagValue(tiffView, tiffStart, ifd0Start, le, 0x8769);
+        if (exifIfdOff !== null) {
+          const dateStr2 = findDateInIFD(tiffView, tiffStart, tiffStart + exifIfdOff, le);
+          if (dateStr2) date = parseExifDateString(dateStr2);
+        }
+      }
+
+      let gps: GpsCoords | null = null;
+      const gpsIfdOff = findTagValue(tiffView, tiffStart, ifd0Start, le, 0x8825);
+      if (gpsIfdOff !== null) {
+        gps = readGpsFromIFD(tiffView, tiffStart, tiffStart + gpsIfdOff, le);
+      }
+
+      if (date || gps) return { date, gps };
     }
   }
   return { date: null, gps: null };
@@ -441,6 +517,11 @@ function buildSegment(photos: RawPhoto[]): PhotoSegment {
 export interface BatchMatchResult {
   matched: PhotoMatchResult[];
   unmatchedSegments: PhotoSegment[];
+  diagnostics: {
+    fileTypes: Record<string, number>;
+    gpsFound: number;
+    gpsTotal: number;
+  };
 }
 
 /**
@@ -457,11 +538,17 @@ export async function batchMatchPhotos(
 ): Promise<BatchMatchResult> {
   const matched: Map<string, PhotoMatchResult> = new Map();
   const unmatchedRaw: RawPhoto[] = [];
+  const fileTypes: Record<string, number> = {};
+  let gpsFound = 0;
+  let gpsTotal = 0;
 
   for (const file of Array.from(files)) {
     if (!file.type.startsWith("image/")) continue;
+    gpsTotal++;
+    fileTypes[file.type] = (fileTypes[file.type] || 0) + 1;
 
     const meta = await getPhotoMetadata(file);
+    if (meta.gps) gpsFound++;
     const dataUrl = await readFileAsDataUrl(file);
     const resized = await resizeImage(dataUrl, 1200);
 
@@ -510,6 +597,7 @@ export async function batchMatchPhotos(
   return {
     matched: Array.from(matched.values()),
     unmatchedSegments: segments,
+    diagnostics: { fileTypes, gpsFound, gpsTotal },
   };
 }
 

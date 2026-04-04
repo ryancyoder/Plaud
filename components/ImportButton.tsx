@@ -71,8 +71,9 @@ export default function ImportButton({
   const [photoResults, setPhotoResults] = useState<{
     matched: PhotoMatchResult[];
     createdEvents: AppEvent[];
-    segments: PhotoSegment[]; // parallel to createdEvents — carries GPS/address
+    segments: PhotoSegment[];
     totalFiles: number;
+    diagnostics: { fileTypes: Record<string, number>; gpsFound: number; gpsTotal: number };
   } | null>(null);
   const [pendingImageFiles, setPendingImageFiles] = useState<FileList | null>(null);
 
@@ -158,6 +159,7 @@ export default function ImportButton({
         createdEvents: created,
         segments: result.unmatchedSegments,
         totalFiles: pendingImageFiles.length,
+        diagnostics: result.diagnostics,
       });
       setPhotoStep("results");
     } catch (err) {
@@ -602,6 +604,17 @@ export default function ImportButton({
                       <div className="text-lg font-bold text-blue-700">{photoResults.createdEvents.length}</div>
                       <div className="text-[10px] text-blue-600 font-medium uppercase">New Events</div>
                     </div>
+                  </div>
+
+                  {/* Diagnostics */}
+                  <div className="rounded-lg bg-gray-50 border border-gray-200 p-2.5 space-y-1">
+                    <p className="text-[10px] font-semibold uppercase text-muted">Diagnostics</p>
+                    <p className="text-[10px] text-gray-500">
+                      File types: {Object.entries(photoResults.diagnostics.fileTypes).map(([t, n]) => `${t} (${n})`).join(", ") || "none"}
+                    </p>
+                    <p className="text-[10px] text-gray-500">
+                      GPS extracted: {photoResults.diagnostics.gpsFound} of {photoResults.diagnostics.gpsTotal} photos
+                    </p>
                   </div>
 
                   {photoResults.matched.length > 0 && (
