@@ -466,7 +466,20 @@ function ClientViewer({ client, events, onDelete, onUpdate }: {
               <input value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} className={fieldClass} placeholder="email@example.com" />
             </div>
             <div>
-              <span className="text-[10px] font-semibold uppercase text-muted">Address</span>
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-semibold uppercase text-muted">Address</span>
+                {form.address.trim() && (
+                  <a
+                    href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(form.address.trim())}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[9px] text-accent hover:underline flex items-center gap-0.5"
+                  >
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                    Look up in Maps
+                  </a>
+                )}
+              </div>
               <input value={form.address} onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))} className={fieldClass} placeholder="123 Main St, City, State" />
             </div>
             <div>
@@ -485,18 +498,18 @@ function ClientViewer({ client, events, onDelete, onUpdate }: {
                     }
                   }}
                   className={fieldClass}
-                  placeholder="Latitude (e.g. 41.4834)"
+                  placeholder="Latitude"
                   inputMode="decimal"
                 />
                 <input
                   value={form.lng}
                   onChange={(e) => setForm((f) => ({ ...f, lng: e.target.value }))}
                   className={fieldClass}
-                  placeholder="Longitude (e.g. -87.3456)"
+                  placeholder="Longitude"
                   inputMode="decimal"
                 />
               </div>
-              <p className="text-[9px] text-gray-400 mt-0.5">Paste from Google Maps: right-click a location → copy coordinates</p>
+              <p className="text-[9px] text-gray-400 mt-0.5">In Google Maps: tap the pin → copy the coordinates → paste above</p>
             </div>
             <div>
               <span className="text-[10px] font-semibold uppercase text-muted">Notes</span>
@@ -535,14 +548,35 @@ function ClientViewer({ client, events, onDelete, onUpdate }: {
 
             {client.address && (
               <div>
-                <span className="text-[10px] font-semibold uppercase text-muted">Address</span>
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-semibold uppercase text-muted">Address</span>
+                  <a
+                    href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(client.address)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[9px] text-accent hover:underline flex items-center gap-0.5"
+                  >
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                    Open in Maps
+                  </a>
+                </div>
                 <p className="text-xs mt-0.5">{client.address}</p>
               </div>
             )}
 
             {(client.lat != null && client.lng != null) && (
               <div>
-                <span className="text-[10px] font-semibold uppercase text-muted">GPS</span>
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-semibold uppercase text-muted">GPS</span>
+                  <a
+                    href={`https://www.google.com/maps/search/?api=1&query=${client.lat},${client.lng}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[9px] text-accent hover:underline"
+                  >
+                    View on map
+                  </a>
+                </div>
                 <p className="text-xs mt-0.5 text-gray-500 font-mono">{client.lat.toFixed(5)}, {client.lng.toFixed(5)}</p>
               </div>
             )}
