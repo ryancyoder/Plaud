@@ -2,10 +2,10 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
-import { Transcript, Attachment, Client } from "@/lib/types";
+import { AppEvent, Attachment, Client } from "@/lib/types";
 import { getWeekDates } from "@/lib/mock-data";
-import { loadTranscripts, saveTranscripts } from "@/lib/store";
-import { loadClients, getTranscriptsForClient } from "@/lib/clients";
+import { loadEvents, saveEvents } from "@/lib/event-store";
+import { loadClients } from "@/lib/clients";
 import {
   saveAttachments as dbSaveAttachments,
   removeAttachment as dbRemoveAttachment,
@@ -16,7 +16,7 @@ import {
   removePendingPhotos,
   resizeImage,
 } from "@/lib/attachment-store";
-import { matchPhotoToTranscript, PhotoMatchResult } from "@/lib/photo-matcher";
+import { matchPhotoToEvent, PhotoMatchResult } from "@/lib/photo-matcher";
 import { hasApiKey, processSegmentWithAI } from "@/lib/claude-api";
 import { isToday } from "@/lib/utils";
 import DayCalendar from "@/components/DayCalendar";
@@ -45,8 +45,8 @@ function todayDateStr(): string {
 }
 
 export default function Dashboard() {
-  const [selectedTranscript, setSelectedTranscript] = useState<Transcript | null>(null);
-  const [transcripts, setTranscripts] = useState<Transcript[]>([]);
+  const [selectedEvent, setSelectedEvent] = useState<AppEvent | null>(null);
+  const [events, setEvents] = useState<AppEvent[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [weekOffset, setWeekOffset] = useState(0);
@@ -57,21 +57,21 @@ export default function Dashboard() {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    const stored = loadTranscripts();
-    const cleaned = stored.map((t) => ({
-      ...t,
-      attachments: (t.attachments || []).map(({ dataUrl, ...rest }) => ({ ...rest, dataUrl: "" })),
+    const stored = loadEvents();
+    const cleaned = stored.map((ev) => ({
+      ...ev,
+      attachments: (ev.attachments || []).map(({ dataUrl, ...rest }) => ({ ...rest, dataUrl: "" })),
     }));
     setClients(loadClients());
-    setTranscripts(cleaned);
+    setEvents(cleaned);
 
     Promise.all([loadAllAttachments(), loadPendingPhotos()])
       .then(([allAtts, pending]) => {
         setPendingPhotoCount(pending.length);
-        setTranscripts((prev) =>
-          prev.map((t) => ({
-            ...t,
-            attachments: allAtts[t.id] || t.attachments || [],
+        setEvents((prev) =>
+          prev.map((ev) => ({
+            ...ev,
+            attachments: allAtts[ev.id] || ev.attachments || [],
           }))
         );
         setMounted(true);
@@ -86,46 +86,49 @@ export default function Dashboard() {
   // Keep selectedDate in sync with week navigation
   useEffect(() => {
     if (!currentWeek.includes(selectedDate)) {
-      // Find today in the new week, or default to Monday
       const todayInWeek = currentWeek.find((d) => isToday(d));
       setSelectedDate(todayInWeek || currentWeek[0]);
     }
   }, [currentWeek, selectedDate]);
 
-  // Filter transcripts by selected client
-  const visibleTranscripts = useMemo(() => {
-    if (!selectedClient) return transcripts;
-    return getTranscriptsForClient(transcripts, selectedClient);
-  }, [transcripts, selectedClient]);
+  // Filter events by selected client
+  const visibleEvents = useMemo(() => {
+    if (!selectedClient) return events;
+    return events.filter(
+      (ev) =>
+        ev.clientId === selectedClient.id ||
+        ev.mentions?.some((m) => m.toLowerCase() === selectedClient.name.toLowerCase())
+    );
+  }, [events, selectedClient]);
 
-  const selectedDateTranscripts = useMemo(
-    () => visibleTranscripts.filter((t) => t.date === selectedDate),
-    [visibleTranscripts, selectedDate]
+  const selectedDateEvents = useMemo(
+    () => visibleEvents.filter((ev) => ev.date === selectedDate),
+    [visibleEvents, selectedDate]
   );
 
-  const actionItems = visibleTranscripts.flatMap((t) => t.actionItems);
-  const callItems = visibleTranscripts.flatMap((t) => t.calls);
-  const errandItems = visibleTranscripts.flatMap((t) => t.errands);
-
-  const transcriptCountByClient = useMemo(() => {
+  const eventCountByClient = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const client of clients) {
-      counts[client.id] = getTranscriptsForClient(transcripts, client).length;
+      counts[client.id] = events.filter(
+        (ev) =>
+          ev.clientId === client.id ||
+          ev.mentions?.some((m) => m.toLowerCase() === client.name.toLowerCase())
+      ).length;
     }
     return counts;
-  }, [transcripts, clients]);
+  }, [events, clients]);
 
-  const rematchPendingPhotos = useCallback(async (allTranscripts: Transcript[]) => {
+  const rematchPendingPhotos = useCallback(async (allEvents: AppEvent[]) => {
     const pending = await loadPendingPhotos();
     if (pending.length === 0) return;
 
+    const recordings = allEvents.filter((ev) => ev.type === "recording");
     const matched: Map<string, PhotoMatchResult> = new Map();
-    const stillPendingIds: string[] = [];
     const matchedIds: string[] = [];
 
     for (const photo of pending) {
       const photoDate = new Date(photo.timestamp);
-      const match = matchPhotoToTranscript(photoDate, allTranscripts);
+      const match = matchPhotoToEvent(photoDate, recordings);
       if (match) {
         matchedIds.push(photo.id);
         const existing = matched.get(match.id);
@@ -133,71 +136,70 @@ export default function Dashboard() {
           existing.attachments.push(photo);
         } else {
           matched.set(match.id, {
-            transcriptId: match.id,
-            transcriptTitle: match.title,
+            eventId: match.id,
+            eventTitle: match.label,
             attachments: [photo],
           });
         }
-      } else {
-        stillPendingIds.push(photo.id);
       }
     }
 
     if (matched.size > 0) {
       const results = Array.from(matched.values());
       for (const r of results) {
-        await dbSaveAttachments(r.transcriptId, r.attachments);
+        await dbSaveAttachments(r.eventId, r.attachments);
       }
       await removePendingPhotos(matchedIds);
-      setTranscripts((prev) => {
-        const updated = prev.map((t) => {
-          const m = results.find((r) => r.transcriptId === t.id);
-          if (!m) return t;
-          return { ...t, attachments: [...(t.attachments || []), ...m.attachments] };
+      setEvents((prev) => {
+        const updated = prev.map((ev) => {
+          const m = results.find((r) => r.eventId === ev.id);
+          if (!m) return ev;
+          return { ...ev, attachments: [...(ev.attachments || []), ...m.attachments] };
         });
-        const forStorage = updated.map((t) => ({
-          ...t,
-          attachments: (t.attachments || []).map(({ dataUrl, ...rest }) => ({ ...rest, dataUrl: "" })),
+        const forStorage = updated.map((ev) => ({
+          ...ev,
+          attachments: (ev.attachments || []).map(({ dataUrl, ...rest }) => ({ ...rest, dataUrl: "" })),
         }));
-        saveTranscripts(forStorage);
+        saveEvents(forStorage);
         return updated;
       });
-      setSelectedTranscript((prev) => {
+      setSelectedEvent((prev) => {
         if (!prev) return prev;
-        const m = results.find((r) => r.transcriptId === prev.id);
+        const m = results.find((r) => r.eventId === prev.id);
         if (!m) return prev;
         return { ...prev, attachments: [...(prev.attachments || []), ...m.attachments] };
       });
     }
 
-    setPendingPhotoCount(stillPendingIds.length);
+    const stillPending = pending.length - matchedIds.length;
+    setPendingPhotoCount(stillPending);
   }, []);
 
-  const handleImport = useCallback((newTranscripts: Transcript[]) => {
-    setTranscripts((prev) => {
-      const updated = [...prev, ...newTranscripts];
+  const handleImport = useCallback((newEvents: AppEvent[]) => {
+    setEvents((prev) => {
+      const updated = [...prev, ...newEvents];
       rematchPendingPhotos(updated);
       return updated;
     });
 
     if (hasApiKey()) {
       (async () => {
-        for (const t of newTranscripts) {
+        for (const ev of newEvents) {
           try {
-            const result = await processSegmentWithAI(t.fullTranscript || t.summary || "");
+            const result = await processSegmentWithAI(ev.fullTranscript || ev.summary || "");
             if (!result) break;
-            setTranscripts((prev) => {
+            setEvents((prev) => {
               const updated = prev.map((p) =>
-                p.id === t.id ? { ...p, title: result.title, summary: result.summary } : p
+                p.id === ev.id ? { ...p, label: result.title, summary: result.summary } : p
               );
-              saveTranscripts(updated.map((p) => ({
+              saveEvents(updated.map((p) => ({
                 ...p,
                 attachments: (p.attachments || []).map(({ dataUrl, ...rest }) => ({ ...rest, dataUrl: "" })),
               })));
               return updated;
             });
-            setSelectedTranscript((prev) =>
-              prev?.id === t.id ? { ...prev, title: result.title, summary: result.summary } : prev
+            setSelectedEvent((prev) =>
+              prev?.id === ev.id ? { ...prev, label: result.title, summary: result.summary } : prev
             );
           } catch {
             // Silently skip failed segments
@@ -208,13 +210,13 @@ export default function Dashboard() {
   }, [rematchPendingPhotos]);
 
   const handleClearData = useCallback(() => {
-    if (window.confirm("Clear all imported transcripts? This cannot be undone.")) {
-      saveTranscripts([]);
+    if (window.confirm("Clear all imported data? This cannot be undone.")) {
+      saveEvents([]);
       clearAllAttachments().catch(() => {});
       clearPendingPhotos().catch(() => {});
       setPendingPhotoCount(0);
-      setTranscripts([]);
-      setSelectedTranscript(null);
+      setEvents([]);
+      setSelectedEvent(null);
     }
   }, []);
 
@@ -222,19 +224,19 @@ export default function Dashboard() {
     setClients(loadClients());
   }, []);
 
-  const handleDeleteTranscript = useCallback((transcriptId: string) => {
-    setTranscripts((prev) => {
-      const updated = prev.filter((t) => t.id !== transcriptId);
-      saveTranscripts(updated.map((t) => ({
-        ...t,
-        attachments: (t.attachments || []).map(({ dataUrl, ...rest }) => ({ ...rest, dataUrl: "" })),
+  const handleDeleteEvent = useCallback((eventId: string) => {
+    setEvents((prev) => {
+      const updated = prev.filter((ev) => ev.id !== eventId);
+      saveEvents(updated.map((ev) => ({
+        ...ev,
+        attachments: (ev.attachments || []).map(({ dataUrl, ...rest }) => ({ ...rest, dataUrl: "" })),
       })));
       return updated;
     });
-    setSelectedTranscript((prev) => (prev?.id === transcriptId ? null : prev));
+    setSelectedEvent((prev) => (prev?.id === eventId ? null : prev));
   }, []);
 
-  const handleAddAttachments = useCallback(async (transcriptId: string, newAttachments: Attachment[]) => {
+  const handleAddAttachments = useCallback(async (eventId: string, newAttachments: Attachment[]) => {
     const processed = await Promise.all(
       newAttachments.map(async (att) => {
         if (att.mimeType.startsWith("image/")) {
@@ -245,46 +247,46 @@ export default function Dashboard() {
       })
     );
 
-    await dbSaveAttachments(transcriptId, processed);
+    await dbSaveAttachments(eventId, processed);
 
-    setTranscripts((prev) => {
-      const updated = prev.map((t) =>
-        t.id === transcriptId
-          ? { ...t, attachments: [...(t.attachments || []), ...processed] }
-          : t
+    setEvents((prev) => {
+      const updated = prev.map((ev) =>
+        ev.id === eventId
+          ? { ...ev, attachments: [...(ev.attachments || []), ...processed] }
+          : ev
       );
-      const forStorage = updated.map((t) => ({
-        ...t,
-        attachments: (t.attachments || []).map(({ dataUrl, ...rest }) => ({ ...rest, dataUrl: "" })),
+      const forStorage = updated.map((ev) => ({
+        ...ev,
+        attachments: (ev.attachments || []).map(({ dataUrl, ...rest }) => ({ ...rest, dataUrl: "" })),
       }));
-      saveTranscripts(forStorage);
+      saveEvents(forStorage);
       return updated;
     });
-    setSelectedTranscript((prev) =>
-      prev?.id === transcriptId
+    setSelectedEvent((prev) =>
+      prev?.id === eventId
         ? { ...prev, attachments: [...(prev.attachments || []), ...processed] }
         : prev
     );
   }, []);
 
-  const handleRemoveAttachment = useCallback(async (transcriptId: string, attachmentId: string) => {
+  const handleRemoveAttachment = useCallback(async (eventId: string, attachmentId: string) => {
     await dbRemoveAttachment(attachmentId);
 
-    setTranscripts((prev) => {
-      const updated = prev.map((t) =>
-        t.id === transcriptId
-          ? { ...t, attachments: (t.attachments || []).filter((a) => a.id !== attachmentId) }
-          : t
+    setEvents((prev) => {
+      const updated = prev.map((ev) =>
+        ev.id === eventId
+          ? { ...ev, attachments: (ev.attachments || []).filter((a) => a.id !== attachmentId) }
+          : ev
       );
-      const forStorage = updated.map((t) => ({
-        ...t,
-        attachments: (t.attachments || []).map(({ dataUrl, ...rest }) => ({ ...rest, dataUrl: "" })),
+      const forStorage = updated.map((ev) => ({
+        ...ev,
+        attachments: (ev.attachments || []).map(({ dataUrl, ...rest }) => ({ ...rest, dataUrl: "" })),
       }));
-      saveTranscripts(forStorage);
+      saveEvents(forStorage);
       return updated;
     });
-    setSelectedTranscript((prev) =>
-      prev?.id === transcriptId
+    setSelectedEvent((prev) =>
+      prev?.id === eventId
         ? { ...prev, attachments: (prev.attachments || []).filter((a) => a.id !== attachmentId) }
         : prev
     );
@@ -292,26 +294,26 @@ export default function Dashboard() {
 
   const handleBatchPhotos = useCallback(async (results: PhotoMatchResult[]) => {
     for (const r of results) {
-      await dbSaveAttachments(r.transcriptId, r.attachments);
+      await dbSaveAttachments(r.eventId, r.attachments);
     }
 
-    setTranscripts((prev) => {
-      const updated = prev.map((t) => {
-        const match = results.find((r) => r.transcriptId === t.id);
-        if (!match) return t;
-        return { ...t, attachments: [...(t.attachments || []), ...match.attachments] };
+    setEvents((prev) => {
+      const updated = prev.map((ev) => {
+        const match = results.find((r) => r.eventId === ev.id);
+        if (!match) return ev;
+        return { ...ev, attachments: [...(ev.attachments || []), ...match.attachments] };
       });
-      const forStorage = updated.map((t) => ({
-        ...t,
-        attachments: (t.attachments || []).map(({ dataUrl, ...rest }) => ({ ...rest, dataUrl: "" })),
+      const forStorage = updated.map((ev) => ({
+        ...ev,
+        attachments: (ev.attachments || []).map(({ dataUrl, ...rest }) => ({ ...rest, dataUrl: "" })),
       }));
-      saveTranscripts(forStorage);
+      saveEvents(forStorage);
       return updated;
     });
 
-    setSelectedTranscript((prev) => {
+    setSelectedEvent((prev) => {
       if (!prev) return prev;
-      const match = results.find((r) => r.transcriptId === prev.id);
+      const match = results.find((r) => r.eventId === prev.id);
       if (!match) return prev;
       return { ...prev, attachments: [...(prev.attachments || []), ...match.attachments] };
     });
@@ -319,9 +321,27 @@ export default function Dashboard() {
     loadPendingPhotos().then((p) => setPendingPhotoCount(p.length)).catch(() => {});
   }, []);
 
-  const getTranscriptsForDate = useCallback(
-    (date: string) => visibleTranscripts.filter((t) => t.date === date),
-    [visibleTranscripts]
+  const handleAssignClient = useCallback((eventId: string, clientId: string | undefined) => {
+    setEvents((prev) => {
+      const updated = prev.map((ev) =>
+        ev.id === eventId ? { ...ev, clientId } : ev
+      );
+      saveEvents(updated.map((ev) => ({
+        ...ev,
+        attachments: (ev.attachments || []).map(({ dataUrl, ...rest }) => ({ ...rest, dataUrl: "" })),
+      })));
+      return updated;
+    });
+    if (selectedEvent?.id === eventId) {
+      setSelectedEvent((prev) =>
+        prev ? { ...prev, clientId } : null
+      );
+    }
+  }, [selectedEvent]);
+
+  const getRecordingsForDate = useCallback(
+    (date: string) => visibleEvents.filter((ev) => ev.date === date),
+    [visibleEvents]
   );
 
   if (!mounted) return null;
@@ -389,8 +409,8 @@ export default function Dashboard() {
             </svg>
           </button>
           <ImportButton onImport={handleImport} />
-          <BatchPhotoImport transcripts={transcripts} clients={clients} onPhotosMatched={handleBatchPhotos} pendingCount={pendingPhotoCount} onPendingCountChange={setPendingPhotoCount} />
-          {transcripts.length > 0 && (
+          <BatchPhotoImport events={events} clients={clients} onPhotosMatched={handleBatchPhotos} pendingCount={pendingPhotoCount} onPendingCountChange={setPendingPhotoCount} />
+          {events.length > 0 && (
             <button
               onClick={handleClearData}
               className="px-2 py-1.5 rounded-lg text-[10px] font-medium text-red-600 border border-red-200 hover:bg-red-50 active:scale-95"
@@ -444,7 +464,7 @@ export default function Dashboard() {
                 weekDates={currentWeek}
                 selectedDate={selectedDate}
                 onSelectDate={setSelectedDate}
-                getTranscriptsForDate={getTranscriptsForDate}
+                getRecordingsForDate={getRecordingsForDate}
               />
             ) : (
               <ClientRoster
@@ -452,7 +472,7 @@ export default function Dashboard() {
                 selectedClientId={selectedClient?.id || null}
                 onSelectClient={setSelectedClient}
                 onClientsChange={handleClientsChange}
-                transcriptCountByClient={transcriptCountByClient}
+                transcriptCountByClient={eventCountByClient}
               />
             )}
           </div>
@@ -462,38 +482,23 @@ export default function Dashboard() {
         <div className="flex-1 flex flex-col overflow-hidden border-r border-border">
           <DayCalendar
             date={selectedDate}
-            transcripts={selectedDateTranscripts}
-            onSelectTranscript={setSelectedTranscript}
-            onDeleteTranscript={handleDeleteTranscript}
-            selectedTranscriptId={selectedTranscript?.id}
+            events={selectedDateEvents}
+            onSelectEvent={setSelectedEvent}
+            onDeleteEvent={handleDeleteEvent}
+            selectedEventId={selectedEvent?.id}
           />
         </div>
 
         {/* Right: Viewer Panel — 50% of screen */}
         <div className="w-[50vw] shrink-0 flex flex-col overflow-hidden">
           <ViewerPanel
-            selectedTranscript={selectedTranscript}
-            actionItems={actionItems}
-            callItems={callItems}
-            errandItems={errandItems}
+            selectedEvent={selectedEvent}
+            selectedClient={selectedClient}
             clients={clients}
-            onClose={() => setSelectedTranscript(null)}
+            onClose={() => setSelectedEvent(null)}
+            onAssignClient={handleAssignClient}
             onAddAttachments={handleAddAttachments}
             onRemoveAttachment={handleRemoveAttachment}
-            onAssignClient={(transcriptId, clientName) => {
-              setTranscripts((prev) => {
-                const updated = prev.map((t) =>
-                  t.id === transcriptId ? { ...t, clientName } : t
-                );
-                saveTranscripts(updated);
-                return updated;
-              });
-              if (selectedTranscript?.id === transcriptId) {
-                setSelectedTranscript((prev) =>
-                  prev ? { ...prev, clientName } : null
-                );
-              }
-            }}
           />
         </div>
       </div>

@@ -1,12 +1,12 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { importFiles, importFromText, importParsedSegments } from "@/lib/store";
+import { importParsedSegments, importFromText } from "@/lib/event-store";
 import { srtToSegments, ParsedTranscript } from "@/lib/srt-parser";
-import { Transcript } from "@/lib/types";
+import { AppEvent } from "@/lib/types";
 
 interface ImportButtonProps {
-  onImport: (transcripts: Transcript[]) => void;
+  onImport: (events: AppEvent[]) => void;
 }
 
 export default function ImportButton({ onImport }: ImportButtonProps) {
@@ -61,34 +61,14 @@ export default function ImportButton({ onImport }: ImportButtonProps) {
   function handleFileSelect(files: FileList | null) {
     if (!files || files.length === 0) return;
 
-    // Check if any SRT files are in the selection
     const hasSrt = Array.from(files).some((f) => f.name.toLowerCase().endsWith(".srt"));
     if (hasSrt) {
-      // Show the start date/time prompt
       setPendingFiles(files);
       setStartDate(todayStr());
       setStartTime("09:00");
       setShowStartPrompt(true);
     } else {
-      // JSON files — import directly
-      doImport(files);
-    }
-  }
-
-  async function doImport(files: FileList, recordingStart?: Date, gap?: number) {
-    setImporting(true);
-    try {
-      const imported = await importFiles(files, recordingStart, gap);
-      if (imported.length > 0) {
-        onImport(imported);
-        toast(`${imported.length} transcript${imported.length > 1 ? "s" : ""} imported`);
-      } else {
-        toast("No .srt or .json files found");
-      }
-    } catch (e) {
-      toast(`Import error: ${e instanceof Error ? e.message : "Unknown error"}`);
-    } finally {
-      setImporting(false);
+      toast("Only .srt files are supported for file import");
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
   }

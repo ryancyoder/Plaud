@@ -1,3 +1,5 @@
+// --- Attachments ---
+
 export interface Attachment {
   id: string;
   name: string;
@@ -7,25 +9,77 @@ export interface Attachment {
   timestamp?: string; // ISO date-time
 }
 
-export interface Transcript {
+// --- Event Types ---
+
+export type EventType =
+  | "recording"
+  | "photo"
+  | "site-visit"
+  | "phone-call"
+  | "text-message"
+  | "email"
+  | "status-change"
+  | "proposal"
+  | "contract"
+  | "delivery"
+  | "payment"
+  | "note";
+
+export const EVENT_TYPES: { key: EventType; label: string }[] = [
+  { key: "recording", label: "Recording" },
+  { key: "photo", label: "Photo" },
+  { key: "site-visit", label: "Site Visit" },
+  { key: "phone-call", label: "Phone Call" },
+  { key: "text-message", label: "Text Message" },
+  { key: "email", label: "Email" },
+  { key: "status-change", label: "Status Change" },
+  { key: "proposal", label: "Proposal" },
+  { key: "contract", label: "Contract" },
+  { key: "delivery", label: "Delivery" },
+  { key: "payment", label: "Payment" },
+  { key: "note", label: "Note" },
+];
+
+/**
+ * Unified event — the core data entity.
+ *
+ * Every piece of client-related data is an event. The `type` field
+ * determines which optional fields are relevant.
+ *
+ * - clientId: the primary contact. Null/undefined = unassigned.
+ * - mentions: client names found in context but not the primary contact.
+ */
+export interface AppEvent {
   id: string;
-  title: string;
-  date: string; // ISO date string
-  startTime: string; // HH:MM
-  duration: number; // minutes
-  summary: string;
+  type: EventType;
+  clientId?: string; // primary contact (nullable = unassigned)
+  date: string; // YYYY-MM-DD
+  startTime?: string; // HH:MM
+  duration?: number; // minutes
+  label: string; // display title
+
+  // Context / mentions
+  mentions?: string[]; // client names mentioned but not primary
+
+  // Recording-specific
+  summary?: string;
   fullTranscript?: string;
-  participants: string[];
-  clientName?: string;
-  tags: Tag[];
-  actionItems: ActionItem[];
-  calls: CallItem[];
-  errands: ErrandItem[];
+  participants?: string[];
+  tags?: Tag[];
+
+  // Attachments — photos/docs on recordings, or standalone photo batches
   attachments?: Attachment[];
-  pinned?: boolean;
+
+  // Simple event extras
+  notes?: string;
+
+  // System-generated flag
+  auto?: boolean;
 }
 
 export type Tag = "meeting" | "call" | "personal" | "medical" | "errand" | "brainstorm" | "interview" | "discussion" | "advertisement";
+
+// --- Client Status ---
 
 export type ClientStatus = "lead" | "propose" | "sent" | "schedule" | "project-management" | "collections" | "paid-in-full";
 
@@ -39,44 +93,7 @@ export const CLIENT_STATUSES: { key: ClientStatus; label: string; color: string 
   { key: "paid-in-full", label: "Paid in Full", color: "bg-green-50 text-green-700 border-green-200" },
 ];
 
-export type ClientEventType =
-  | "site-visit"
-  | "phone-call"
-  | "text-message"
-  | "email"
-  | "status-change"
-  | "proposal"
-  | "contract"
-  | "delivery"
-  | "payment"
-  | "note"
-  | "recording"
-  | "photo";
-
-export const CLIENT_EVENT_TYPES: { key: ClientEventType; label: string; icon: string }[] = [
-  { key: "site-visit", label: "Site Visit", icon: "house" },
-  { key: "phone-call", label: "Phone Call", icon: "phone" },
-  { key: "text-message", label: "Text Message", icon: "message" },
-  { key: "email", label: "Email", icon: "mail" },
-  { key: "status-change", label: "Status Change", icon: "flag" },
-  { key: "proposal", label: "Proposal", icon: "file" },
-  { key: "contract", label: "Contract", icon: "clipboard" },
-  { key: "delivery", label: "Delivery", icon: "truck" },
-  { key: "payment", label: "Payment", icon: "dollar" },
-  { key: "note", label: "Note", icon: "pencil" },
-  { key: "recording", label: "Recording", icon: "mic" },
-  { key: "photo", label: "Photo", icon: "camera" },
-];
-
-export interface ClientEvent {
-  id: string;
-  clientId: string;
-  type: ClientEventType;
-  date: string; // ISO date string
-  label: string; // short description
-  auto?: boolean; // true if system-generated
-  photoUrl?: string; // base64 data URL for photo events
-}
+// --- Client ---
 
 export interface Client {
   id: string;
@@ -89,37 +106,4 @@ export interface Client {
   address?: string;
   notes?: string;
   appointmentDate?: string;
-  transcriptCount: number;
-  lastSeen?: string;
-}
-
-export interface ActionItem {
-  id: string;
-  text: string;
-  done: boolean;
-  source: string; // transcript title
-  dueDate?: string;
-}
-
-export interface CallItem {
-  id: string;
-  person: string;
-  reason: string;
-  done: boolean;
-  source: string;
-}
-
-export interface ErrandItem {
-  id: string;
-  text: string;
-  done: boolean;
-  source: string;
-  location?: string;
-}
-
-export interface WeekSummary {
-  totalTranscripts: number;
-  totalMinutes: number;
-  topParticipants: string[];
-  keyThemes: string[];
 }

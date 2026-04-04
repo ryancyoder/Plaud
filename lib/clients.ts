@@ -1,6 +1,6 @@
 "use client";
 
-import { Client, ClientStatus, Transcript } from "./types";
+import { Client, ClientStatus } from "./types";
 
 const CLIENTS_KEY = "plaud-clients";
 
@@ -28,7 +28,6 @@ export function addClient(name: string, company?: string, type: "client" | "cont
     name,
     company,
     type,
-    transcriptCount: 0,
   };
   clients.push(client);
   saveClients(clients);
@@ -56,98 +55,4 @@ export function updateClient(id: string, updates: Partial<Omit<Client, "id">>): 
     Object.assign(client, updates);
     saveClients(clients);
   }
-}
-
-// Match participant names from transcripts against client roster
-function normalizeForMatch(name: string): string {
-  return name.toLowerCase().trim().replace(/[^a-z\s]/g, "");
-}
-
-export function matchTranscriptToClients(transcript: Transcript, clients: Client[]): Client[] {
-  const matched: Client[] = [];
-
-  for (const client of clients) {
-    const clientNorm = normalizeForMatch(client.name);
-    const clientParts = clientNorm.split(/\s+/);
-
-    // Check participants
-    for (const participant of transcript.participants) {
-      const partNorm = normalizeForMatch(participant);
-      // Full match or last-name match
-      if (
-        partNorm === clientNorm ||
-        partNorm.includes(clientNorm) ||
-        clientNorm.includes(partNorm) ||
-        (clientParts.length > 1 && partNorm.includes(clientParts[clientParts.length - 1]))
-      ) {
-        matched.push(client);
-        break;
-      }
-    }
-
-    // Check clientName field
-    if (transcript.clientName) {
-      const cnNorm = normalizeForMatch(transcript.clientName);
-      if (cnNorm === clientNorm || cnNorm.includes(clientNorm) || clientNorm.includes(cnNorm)) {
-        if (!matched.find((m) => m.id === client.id)) {
-          matched.push(client);
-        }
-      }
-    }
-  }
-
-  return matched;
-}
-
-// Auto-discover new clients from transcript participants
-export function autoDiscoverClients(transcripts: Transcript[]): string[] {
-  const existingClients = loadClients();
-  const existingNames = new Set(existingClients.map((c) => normalizeForMatch(c.name)));
-  const discovered = new Set<string>();
-
-  for (const t of transcripts) {
-    for (const p of t.participants) {
-      const norm = normalizeForMatch(p);
-      if (norm && !existingNames.has(norm) && !discovered.has(norm)) {
-        discovered.add(p.trim()); // keep original casing
-      }
-    }
-    if (t.clientName) {
-      const norm = normalizeForMatch(t.clientName);
-      if (norm && !existingNames.has(norm) && !discovered.has(norm)) {
-        discovered.add(t.clientName.trim());
-      }
-    }
-  }
-
-  return Array.from(discovered);
-}
-
-// Get transcripts filtered by client
-export function getTranscriptsForClient(transcripts: Transcript[], client: Client): Transcript[] {
-  const clientNorm = normalizeForMatch(client.name);
-  const clientParts = clientNorm.split(/\s+/);
-
-  return transcripts.filter((t) => {
-    // Check participants
-    for (const participant of t.participants) {
-      const partNorm = normalizeForMatch(participant);
-      if (
-        partNorm === clientNorm ||
-        partNorm.includes(clientNorm) ||
-        clientNorm.includes(partNorm) ||
-        (clientParts.length > 1 && partNorm.includes(clientParts[clientParts.length - 1]))
-      ) {
-        return true;
-      }
-    }
-    // Check clientName
-    if (t.clientName) {
-      const cnNorm = normalizeForMatch(t.clientName);
-      if (cnNorm === clientNorm || cnNorm.includes(clientNorm) || clientNorm.includes(cnNorm)) {
-        return true;
-      }
-    }
-    return false;
-  });
 }
