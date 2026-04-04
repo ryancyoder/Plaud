@@ -338,6 +338,8 @@ function ClientViewer({ client, events, onDelete, onUpdate }: {
     phone: client.phone || "",
     email: client.email || "",
     address: client.address || "",
+    lat: client.lat != null ? String(client.lat) : "",
+    lng: client.lng != null ? String(client.lng) : "",
     notes: client.notes || "",
   });
 
@@ -349,26 +351,33 @@ function ClientViewer({ client, events, onDelete, onUpdate }: {
       phone: client.phone || "",
       email: client.email || "",
       address: client.address || "",
+      lat: client.lat != null ? String(client.lat) : "",
+      lng: client.lng != null ? String(client.lng) : "",
       notes: client.notes || "",
     });
     setEditing(false);
-  }, [client.id, client.name, client.company, client.phone, client.email, client.address, client.notes]);
+  }, [client.id, client.name, client.company, client.phone, client.email, client.address, client.lat, client.lng, client.notes]);
 
   function handleSave() {
-    const addressChanged = (form.address.trim() || "") !== (client.address || "");
+    const parsedLat = form.lat.trim() ? parseFloat(form.lat.trim()) : undefined;
+    const parsedLng = form.lng.trim() ? parseFloat(form.lng.trim()) : undefined;
+    const hasValidCoords = parsedLat != null && !isNaN(parsedLat) && parsedLng != null && !isNaN(parsedLng);
+
     onUpdate(client.id, {
       name: form.name.trim(),
       company: form.company.trim() || undefined,
       phone: form.phone.trim() || undefined,
       email: form.email.trim() || undefined,
       address: form.address.trim() || undefined,
-      // Clear lat/lng if address changed so it gets re-geocoded
-      ...(addressChanged ? { lat: undefined, lng: undefined } : {}),
+      lat: hasValidCoords ? parsedLat : undefined,
+      lng: hasValidCoords ? parsedLng : undefined,
       notes: form.notes.trim() || undefined,
     });
     setEditing(false);
-    // Geocode the new address in the background
-    if (addressChanged && form.address.trim()) {
+
+    // Only try background geocoding if address changed and no coordinates entered manually
+    const addressChanged = (form.address.trim() || "") !== (client.address || "");
+    if (addressChanged && form.address.trim() && !hasValidCoords) {
       import("@/lib/clients").then(({ geocodeClientAddress }) => {
         geocodeClientAddress(client.id);
       });
@@ -397,6 +406,8 @@ function ClientViewer({ client, events, onDelete, onUpdate }: {
                     phone: client.phone || "",
                     email: client.email || "",
                     address: client.address || "",
+                    lat: client.lat != null ? String(client.lat) : "",
+                    lng: client.lng != null ? String(client.lng) : "",
                     notes: client.notes || "",
                   });
                   setEditing(false);
@@ -459,6 +470,35 @@ function ClientViewer({ client, events, onDelete, onUpdate }: {
               <input value={form.address} onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))} className={fieldClass} placeholder="123 Main St, City, State" />
             </div>
             <div>
+              <span className="text-[10px] font-semibold uppercase text-muted">GPS Coordinates</span>
+              <div className="flex gap-2">
+                <input
+                  value={form.lat}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    // Auto-split "41.4834, -87.3456" pasted into lat field
+                    const parts = v.split(/[,\s]+/).filter(Boolean);
+                    if (parts.length === 2 && !isNaN(Number(parts[0])) && !isNaN(Number(parts[1]))) {
+                      setForm((f) => ({ ...f, lat: parts[0], lng: parts[1] }));
+                    } else {
+                      setForm((f) => ({ ...f, lat: v }));
+                    }
+                  }}
+                  className={fieldClass}
+                  placeholder="Latitude (e.g. 41.4834)"
+                  inputMode="decimal"
+                />
+                <input
+                  value={form.lng}
+                  onChange={(e) => setForm((f) => ({ ...f, lng: e.target.value }))}
+                  className={fieldClass}
+                  placeholder="Longitude (e.g. -87.3456)"
+                  inputMode="decimal"
+                />
+              </div>
+              <p className="text-[9px] text-gray-400 mt-0.5">Paste from Google Maps: right-click a location → copy coordinates</p>
+            </div>
+            <div>
               <span className="text-[10px] font-semibold uppercase text-muted">Notes</span>
               <textarea value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} rows={4} className={`${fieldClass} resize-y`} />
             </div>
@@ -497,6 +537,13 @@ function ClientViewer({ client, events, onDelete, onUpdate }: {
               <div>
                 <span className="text-[10px] font-semibold uppercase text-muted">Address</span>
                 <p className="text-xs mt-0.5">{client.address}</p>
+              </div>
+            )}
+
+            {(client.lat != null && client.lng != null) && (
+              <div>
+                <span className="text-[10px] font-semibold uppercase text-muted">GPS</span>
+                <p className="text-xs mt-0.5 text-gray-500 font-mono">{client.lat.toFixed(5)}, {client.lng.toFixed(5)}</p>
               </div>
             )}
 
