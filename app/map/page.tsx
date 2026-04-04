@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { Client, ClientStatus, CLIENT_STATUSES } from "@/lib/types";
 import { loadClients, updateClient } from "@/lib/clients";
+import { forwardGeocode } from "@/lib/photo-matcher";
 import { getLastName } from "@/lib/utils";
 import { STATUS_PIN_COLORS, DEFAULT_PIN_COLOR } from "@/lib/map-utils";
 
@@ -21,11 +22,53 @@ export default function MapPage() {
   );
   const [sortMode, setSortMode] = useState<SortMode>("alpha");
   const [mounted, setMounted] = useState(false);
+  const [geocodeStatus, setGeocodeStatus] = useState<string | null>(null);
+  const geocodingRef = useRef(false);
 
   useEffect(() => {
     setClients(loadClients());
     setMounted(true);
   }, []);
+
+  const needsGeocodingCount = useMemo(
+    () => clients.filter((c) => c.address && c.lat == null && c.lng == null).length,
+    [clients],
+  );
+
+  const handleGeocodeAll = useCallback(async () => {
+    if (geocodingRef.current) return;
+    geocodingRef.current = true;
+    const toGeocode = clients.filter(
+      (c) => c.address && c.lat == null && c.lng == null,
+    );
+    let success = 0;
+    let fail = 0;
+
+    for (let i = 0; i < toGeocode.length; i++) {
+      const c = toGeocode[i];
+      setGeocodeStatus(`Geocoding ${i + 1}/${toGeocode.length}: ${c.name}...`);
+      try {
+        const coords = await forwardGeocode(c.address!);
+        if (coords) {
+          updateClient(c.id, { lat: coords.lat, lng: coords.lng });
+          success++;
+        } else {
+          fail++;
+        }
+      } catch {
+        fail++;
+      }
+      // Rate limit: 1 req/sec
+      if (i < toGeocode.length - 1) {
+        await new Promise((r) => setTimeout(r, 1100));
+      }
+    }
+
+    setClients(loadClients());
+    setGeocodeStatus(`Done: ${success} geocoded, ${fail} failed`);
+    setTimeout(() => setGeocodeStatus(null), 5000);
+    geocodingRef.current = false;
+  }, [clients]);
 
   const filteredClients = useMemo(
     () => clients.filter((c) => activeStatuses.has(c.status || "lead")),
@@ -205,6 +248,23 @@ export default function MapPage() {
               </button>
             </div>
           </div>
+
+          {/* Geocode controls */}
+          {geocodeStatus ? (
+            <div className="shrink-0 px-3 py-1.5 bg-amber-50 border-b border-amber-200 text-[10px] text-amber-700">
+              {geocodeStatus}
+            </div>
+          ) : needsGeocodingCount > 0 ? (
+            <div className="shrink-0 px-3 py-1.5 border-b border-border flex items-center justify-between">
+              <span className="text-[10px] text-muted">{needsGeocodingCount} need geocoding</span>
+              <button
+                onClick={handleGeocodeAll}
+                className="text-[10px] px-2 py-0.5 rounded bg-accent text-white hover:bg-blue-600 active:scale-95 font-medium"
+              >
+                Geocode All
+              </button>
+            </div>
+          ) : null}
 
           {/* Client list */}
           <div className="flex-1 overflow-y-auto">
