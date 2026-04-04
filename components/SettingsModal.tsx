@@ -21,7 +21,10 @@ import {
   loadPendingPhotos,
   savePendingPhotos,
   clearPendingPhotos,
+  loadAllScratchpads,
+  saveScratchpad,
   PendingPhoto,
+  ScratchpadData,
 } from "@/lib/attachment-store";
 import type { Attachment } from "@/lib/types";
 
@@ -432,7 +435,13 @@ function DataTab() {
         backup["_pendingPhotos"] = pending;
       }
 
-      // 4. Build and download the file
+      // 4. Gather scratchpads
+      const scratchpads = await loadAllScratchpads();
+      if (scratchpads.length > 0) {
+        backup["_scratchpads"] = scratchpads;
+      }
+
+      // 5. Build and download the file
       setExportProgress("Creating backup file...");
       const json = JSON.stringify(backup);
       const sizeMB = (json.length / 1024 / 1024).toFixed(1);
@@ -515,10 +524,21 @@ function DataTab() {
         pendingCount = data._pendingPhotos.length;
       }
 
+      // 4. Restore scratchpads
+      let padCount = 0;
+      if (data._scratchpads && Array.isArray(data._scratchpads)) {
+        setImportProgress("Restoring scratchpads...");
+        for (const pad of data._scratchpads as ScratchpadData[]) {
+          await saveScratchpad(pad);
+          padCount++;
+        }
+      }
+
       setImportProgress(null);
       const parts = [`${lsCount} data entries`];
       if (attCount > 0) parts.push(`${attCount} attachments`);
       if (pendingCount > 0) parts.push(`${pendingCount} pending photos`);
+      if (padCount > 0) parts.push(`${padCount} scratchpads`);
       setImportStatus({
         message: `Restored ${parts.join(", ")}. Reload the page to see changes.`,
       });

@@ -5,8 +5,10 @@ import { AppEvent, Attachment, Client } from "@/lib/types";
 import { formatDuration, getTagColor, formatDate } from "@/lib/utils";
 import { hasApiKey, getCachedSegmentSummary, generateSegmentSummary, getCachedSummary, generateDailySummary } from "@/lib/claude-api";
 import PdfViewer from "@/components/PdfViewer";
+import DrawingCanvas from "@/components/DrawingCanvas";
+import { loadScratchpad, saveScratchpad, ScratchpadData, ScratchpadStroke } from "@/lib/attachment-store";
 
-type Tab = "transcript" | "photos" | "documents";
+type Tab = "transcript" | "photos" | "documents" | "scratchpad";
 type ViewMode = "event" | "client-aggregate" | "day-aggregate";
 
 interface ViewerPanelProps {
@@ -59,10 +61,20 @@ export default function ViewerPanel({
     return { photoCount: 0, docCount: 0 };
   }, [viewMode, selectedEvent, aggregateEvents]);
 
+  // Determine which client is active (for scratchpad)
+  const activeClient = useMemo(() => {
+    if (viewMode === "client-aggregate" && selectedClient) return selectedClient;
+    if (viewMode === "event" && selectedEvent?.clientId) {
+      return clients.find((c) => c.id === selectedEvent.clientId) || null;
+    }
+    return null;
+  }, [viewMode, selectedClient, selectedEvent, clients]);
+
   const tabs: { key: Tab; label: string; count?: number }[] = [
     { key: "transcript", label: viewMode === "event" ? "Detail" : "Overview" },
     { key: "photos", label: "Photos", count: photoCount },
     { key: "documents", label: "Docs", count: docCount },
+    ...(activeClient ? [{ key: "scratchpad" as const, label: "Pad" }] : []),
   ];
 
   return (
@@ -87,7 +99,7 @@ export default function ViewerPanel({
         ))}
       </div>
 
-      <div className="flex-1 overflow-y-auto">
+      <div className={`flex-1 ${activeTab === "scratchpad" ? "overflow-hidden flex flex-col" : "overflow-y-auto"}`}>
         {activeTab === "transcript" && (
           <>
             {viewMode === "event" && (
@@ -125,6 +137,14 @@ export default function ViewerPanel({
             aggregateEvents={aggregateEvents}
             onAddAttachments={onAddAttachments}
             onRemoveAttachment={onRemoveAttachment}
+          />
+        )}
+        {activeTab === "scratchpad" && activeClient && (
+          <ScratchpadTab
+            client={activeClient}
+            photos={aggregateEvents.flatMap((ev) =>
+              (ev.attachments || []).filter((a) => a.mimeType.startsWith("image/") && a.dataUrl)
+            )}
           />
         )}
       </div>
@@ -792,6 +812,128 @@ function DocumentList({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// --- Scratchpad Tab ---
+
+function ScratchpadTab({ client, photos }: { client: Client; photos: Attachment[] }) {
+  const [scratchpad, setScratchpad] = useState<ScratchpadData | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [backgroundSrc, setBackgroundSrc] = useState<string | null>(null);
+  const [showBgPicker, setShowBgPicker] = useState(false);
+  const saveTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Load scratchpad from IndexedDB when client changes
+  useEffect(() => {
+    setLoaded(false);
+    setShowBgPicker(false);
+    loadScratchpad(client.id).then((data) => {
+      setScratchpad(data);
+      setBackgroundSrc(data?.backgroundDataUrl || null);
+      setLoaded(true);
+    }).catch(() => setLoaded(true));
+  }, [client.id]);
+
+  // Debounced auto-save
+  const handleStrokesChange = useCallback(
+    (strokes: ScratchpadStroke[], canvasDataUrl: string) => {
+      if (saveTimeout.current) clearTimeout(saveTimeout.current);
+      saveTimeout.current = setTimeout(() => {
+        const data: ScratchpadData = {
+          clientId: client.id,
+          imageDataUrl: canvasDataUrl,
+          backgroundDataUrl: backgroundSrc,
+          strokes,
+          updatedAt: new Date().toISOString(),
+        };
+        saveScratchpad(data);
+        setScratchpad(data);
+      }, 500);
+    },
+    [client.id, backgroundSrc],
+  );
+
+  const handleSetBackground = useCallback((src: string | null) => {
+    setBackgroundSrc(src);
+    setShowBgPicker(false);
+    // Save immediately with new background, clear strokes
+    const data: ScratchpadData = {
+      clientId: client.id,
+      imageDataUrl: "",
+      backgroundDataUrl: src,
+      strokes: [],
+      updatedAt: new Date().toISOString(),
+    };
+    saveScratchpad(data);
+    setScratchpad(data);
+  }, [client.id]);
+
+  if (!loaded) {
+    return (
+      <div className="flex items-center justify-center h-full text-xs text-muted">
+        Loading scratchpad...
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Background picker header */}
+      <div className="flex items-center justify-between px-3 py-1.5 border-b border-border bg-white shrink-0">
+        <span className="text-[10px] font-semibold text-muted uppercase">
+          {client.name}&rsquo;s Pad
+        </span>
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => setShowBgPicker(!showBgPicker)}
+            className="text-[10px] px-2 py-0.5 rounded border border-border text-muted hover:bg-gray-100 active:scale-95"
+          >
+            {backgroundSrc ? "Change BG" : "Add BG"}
+          </button>
+          {backgroundSrc && (
+            <button
+              onClick={() => handleSetBackground(null)}
+              className="text-[10px] px-2 py-0.5 rounded border border-red-200 text-red-500 hover:bg-red-50 active:scale-95"
+            >
+              Clear BG
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Background image picker */}
+      {showBgPicker && (
+        <div className="px-3 py-2 border-b border-border bg-gray-50 shrink-0">
+          <p className="text-[10px] text-muted mb-2">Select a photo as background:</p>
+          {photos.length > 0 ? (
+            <div className="flex gap-2 overflow-x-auto pb-1">
+              {photos.map((photo) => (
+                <button
+                  key={photo.id}
+                  onClick={() => handleSetBackground(photo.dataUrl)}
+                  className="shrink-0 w-16 h-16 rounded-lg overflow-hidden border-2 border-border hover:border-accent active:scale-95"
+                >
+                  <img src={photo.dataUrl} alt={photo.name} className="w-full h-full object-cover" />
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p className="text-[10px] text-gray-400">No photos available for this client.</p>
+          )}
+        </div>
+      )}
+
+      {/* Drawing canvas */}
+      <div className="flex-1 min-h-0">
+        <DrawingCanvas
+          key={`${client.id}-${backgroundSrc || "blank"}`}
+          backgroundSrc={backgroundSrc}
+          initialStrokes={scratchpad?.strokes || []}
+          onStrokesChange={handleStrokesChange}
+        />
+      </div>
     </div>
   );
 }

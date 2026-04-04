@@ -3,9 +3,10 @@
 import { Attachment } from "./types";
 
 const DB_NAME = "plaud-attachments";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const STORE_NAME = "attachments";
 const PENDING_STORE = "pending-photos";
+const SCRATCHPAD_STORE = "scratchpads";
 
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -17,6 +18,9 @@ function openDB(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains(PENDING_STORE)) {
         db.createObjectStore(PENDING_STORE, { keyPath: "id" });
+      }
+      if (!db.objectStoreNames.contains(SCRATCHPAD_STORE)) {
+        db.createObjectStore(SCRATCHPAD_STORE, { keyPath: "clientId" });
       }
     };
     request.onsuccess = () => resolve(request.result);
@@ -204,5 +208,67 @@ export function resizeImage(dataUrl: string, maxDim = 1200): Promise<string> {
     };
     img.onerror = () => resolve(dataUrl); // fallback to original
     img.src = dataUrl;
+  });
+}
+
+// --- Scratchpad storage ---
+// One scratchpad per client, stored as a PNG data URL of the canvas
+// plus the strokes array for undo support.
+
+export interface ScratchpadData {
+  clientId: string;
+  /** PNG data URL of the full canvas (for quick display) */
+  imageDataUrl: string;
+  /** Background image data URL (photo/PDF page), or null for blank */
+  backgroundDataUrl: string | null;
+  /** Serialized strokes for undo/redo */
+  strokes: ScratchpadStroke[];
+  updatedAt: string; // ISO timestamp
+}
+
+export interface ScratchpadStroke {
+  points: { x: number; y: number }[];
+  color: string;
+  width: number;
+  tool: "pen" | "eraser";
+}
+
+export async function saveScratchpad(data: ScratchpadData): Promise<void> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(SCRATCHPAD_STORE, "readwrite");
+    tx.objectStore(SCRATCHPAD_STORE).put(data);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+export async function loadScratchpad(clientId: string): Promise<ScratchpadData | null> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(SCRATCHPAD_STORE, "readonly");
+    const req = tx.objectStore(SCRATCHPAD_STORE).get(clientId);
+    req.onsuccess = () => resolve(req.result ?? null);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+export async function deleteScratchpad(clientId: string): Promise<void> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(SCRATCHPAD_STORE, "readwrite");
+    tx.objectStore(SCRATCHPAD_STORE).delete(clientId);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+export async function loadAllScratchpads(): Promise<ScratchpadData[]> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(SCRATCHPAD_STORE, "readonly");
+    const req = tx.objectStore(SCRATCHPAD_STORE).getAll();
+    req.onsuccess = () => resolve(req.result ?? []);
+    req.onerror = () => reject(req.error);
   });
 }
