@@ -89,11 +89,22 @@ export default function ImportButton({
     return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
   }
 
+  const isDocFile = (f: File) =>
+    f.type === "application/pdf" ||
+    f.type === "application/msword" ||
+    f.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+    f.type === "application/vnd.ms-excel" ||
+    f.type === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+    f.type === "text/plain" ||
+    f.type === "text/csv" ||
+    f.name.toLowerCase().match(/\.(pdf|doc|docx|xls|xlsx|txt|csv)$/);
+
   function handleFileSelect(files: FileList | null) {
     if (!files || files.length === 0) return;
 
     const hasSrt = Array.from(files).some((f) => f.name.toLowerCase().endsWith(".srt"));
     const hasImages = Array.from(files).some((f) => f.type.startsWith("image/"));
+    const hasDocs = Array.from(files).some(isDocFile);
 
     if (hasSrt) {
       setPendingFiles(files);
@@ -103,8 +114,60 @@ export default function ImportButton({
     } else if (hasImages) {
       setPendingImageFiles(files);
       setPhotoStep("config");
+    } else if (hasDocs) {
+      importDocuments(Array.from(files).filter(isDocFile));
     } else {
-      toast("Supported: .srt transcript files or image files");
+      toast("Supported: .srt transcripts, images, or documents (PDF, DOC, XLS, TXT)");
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
+
+  async function importDocuments(files: File[]) {
+    setImporting(true);
+    try {
+      const today = todayStr();
+      const now = nowTimeStr();
+      const attachments: Attachment[] = [];
+
+      for (const file of files) {
+        const dataUrl = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.readAsDataURL(file);
+        });
+        attachments.push({
+          id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          name: file.name,
+          type: "document",
+          mimeType: file.type || "application/octet-stream",
+          dataUrl,
+          timestamp: new Date().toISOString(),
+        });
+      }
+
+      const fileNames = files.map((f) => f.name).join(", ");
+      const label = files.length === 1
+        ? files[0].name
+        : `${files.length} Documents`;
+
+      const strippedAtts: Attachment[] = attachments.map(({ dataUrl, ...rest }) => ({ ...rest, dataUrl: "" }));
+
+      const newEvent = addEvent({
+        type: "site-visit",
+        date: today,
+        startTime: now,
+        label,
+        notes: `Imported: ${fileNames}`,
+        attachments: strippedAtts,
+      });
+
+      await dbSaveAttachments(newEvent.id, attachments);
+      onImport([{ ...newEvent, attachments }]);
+      toast(`Imported ${files.length} document${files.length !== 1 ? "s" : ""}`);
+    } catch {
+      toast("Failed to import documents");
+    } finally {
+      setImporting(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
   }
