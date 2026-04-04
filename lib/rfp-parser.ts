@@ -76,6 +76,22 @@ export function parseRfpClipboard(text: string): ParsedRfp {
     }
 
     if (pastHeader) {
+      // Still capture email/phone if not yet found, even after blank lines
+      if (!email) {
+        const cleanedLine = line.replace(/<mailto:[^>]*>/gi, "");
+        const emailMatch = cleanedLine.match(emailPattern);
+        if (emailMatch) {
+          email = emailMatch[1].toLowerCase();
+          continue;
+        }
+      }
+      if (!phone) {
+        const phoneMatch2 = line.match(phonePattern);
+        if (phoneMatch2) {
+          phone = normalizePhone(phoneMatch2[1]);
+          continue;
+        }
+      }
       noteLines.push(line);
       continue;
     }
