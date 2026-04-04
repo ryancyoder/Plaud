@@ -4,11 +4,10 @@ import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { Client, ClientStatus, CLIENT_STATUSES } from "@/lib/types";
-import { loadClients } from "@/lib/clients";
+import { loadClients, updateClient } from "@/lib/clients";
 import { getLastName } from "@/lib/utils";
 import { STATUS_PIN_COLORS, DEFAULT_PIN_COLOR } from "@/lib/map-utils";
 
-// Dynamic import to avoid SSR issues with Leaflet
 const MapView = dynamic(() => import("@/components/MapView"), { ssr: false });
 
 type SortMode = "alpha" | "status";
@@ -16,56 +15,23 @@ type SortMode = "alpha" | "status";
 export default function MapPage() {
   const [clients, setClients] = useState<Client[]>([]);
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
+  const [placingClientId, setPlacingClientId] = useState<string | null>(null);
   const [activeStatuses, setActiveStatuses] = useState<Set<ClientStatus>>(
     new Set(CLIENT_STATUSES.map((s) => s.key)),
   );
   const [sortMode, setSortMode] = useState<SortMode>("alpha");
   const [mounted, setMounted] = useState(false);
-  const [geocodingCount, setGeocodingCount] = useState(0);
-  const geocodingRef = useRef(false);
 
   useEffect(() => {
     setClients(loadClients());
     setMounted(true);
   }, []);
 
-  const needsGeocodingCount = useMemo(
-    () => clients.filter((c) => c.address && c.lat == null && c.lng == null).length,
-    [clients],
-  );
-
-  const handleGeocodeAll = useCallback(async () => {
-    if (geocodingRef.current) return;
-    geocodingRef.current = true;
-    const needsGeocoding = clients.filter(
-      (c) => c.address && c.lat == null && c.lng == null,
-    );
-    setGeocodingCount(needsGeocoding.length);
-
-    const { geocodeClientAddress } = await import("@/lib/clients");
-    for (let i = 0; i < needsGeocoding.length; i++) {
-      try {
-        await geocodeClientAddress(needsGeocoding[i].id);
-      } catch (err) {
-        console.warn(`[map] Geocode failed for ${needsGeocoding[i].name}:`, err);
-      }
-      setGeocodingCount(needsGeocoding.length - i - 1);
-      if (i < needsGeocoding.length - 1) {
-        await new Promise((r) => setTimeout(r, 1100));
-      }
-    }
-    setClients(loadClients());
-    setGeocodingCount(0);
-    geocodingRef.current = false;
-  }, [clients]);
-
-  // Filtered clients based on active status toggles
   const filteredClients = useMemo(
     () => clients.filter((c) => activeStatuses.has(c.status || "lead")),
     [clients, activeStatuses],
   );
 
-  // Sorted client list for sidebar
   const sortedClients = useMemo(() => {
     const sorted = [...filteredClients];
     if (sortMode === "alpha") {
@@ -82,31 +48,51 @@ export default function MapPage() {
     return sorted;
   }, [filteredClients, sortMode]);
 
-  // Mappable clients (with coordinates) for the map
   const mappableClients = useMemo(
     () => filteredClients.filter((c) => c.lat != null && c.lng != null),
+    [filteredClients],
+  );
+
+  const unmappedCount = useMemo(
+    () => filteredClients.filter((c) => c.lat == null || c.lng == null).length,
     [filteredClients],
   );
 
   const toggleStatus = useCallback((status: ClientStatus) => {
     setActiveStatuses((prev) => {
       const next = new Set(prev);
-      if (next.has(status)) {
-        next.delete(status);
-      } else {
-        next.add(status);
-      }
+      if (next.has(status)) next.delete(status);
+      else next.add(status);
       return next;
     });
   }, []);
 
   const handleSelectClient = useCallback((id: string | null) => {
+    setPlacingClientId(null);
     setSelectedClientId((prev) => (prev === id ? null : id));
+  }, []);
+
+  // Start placing mode for a client without coordinates
+  const handleStartPlacing = useCallback((clientId: string) => {
+    setPlacingClientId(clientId);
+    setSelectedClientId(clientId);
+  }, []);
+
+  // Place a client on the map at the tapped location
+  const handlePlaceClient = useCallback((clientId: string, lat: number, lng: number) => {
+    updateClient(clientId, { lat, lng });
+    setClients(loadClients());
+    setPlacingClientId(null);
+  }, []);
+
+  // Cancel placing mode
+  const handleCancelPlacing = useCallback(() => {
+    setPlacingClientId(null);
   }, []);
 
   if (!mounted) return null;
 
-  const unmappedCount = filteredClients.length - mappableClients.length;
+  const placingClient = placingClientId ? clients.find((c) => c.id === placingClientId) : null;
 
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-background">
@@ -143,6 +129,21 @@ export default function MapPage() {
         </div>
       </header>
 
+      {/* Placing mode banner */}
+      {placingClient && (
+        <div className="shrink-0 px-4 py-2 bg-blue-50 border-b border-blue-200 flex items-center justify-between">
+          <span className="text-xs text-blue-800 font-medium">
+            Tap the map to place <strong>{placingClient.name}</strong>
+          </span>
+          <button
+            onClick={handleCancelPlacing}
+            className="text-[10px] px-2.5 py-0.5 rounded border border-blue-300 text-blue-600 hover:bg-blue-100 active:scale-95 font-medium"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+
       {/* Main content */}
       <div className="flex-1 flex overflow-hidden">
         {/* Left sidebar */}
@@ -170,16 +171,11 @@ export default function MapPage() {
                     key={s.key}
                     onClick={() => toggleStatus(s.key)}
                     className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border transition-all ${
-                      active
-                        ? "border-current opacity-100"
-                        : "border-gray-200 opacity-40"
+                      active ? "border-current opacity-100" : "border-gray-200 opacity-40"
                     }`}
                     style={active ? { color, borderColor: color, backgroundColor: `${color}15` } : {}}
                   >
-                    <span
-                      className="w-2 h-2 rounded-full shrink-0"
-                      style={{ backgroundColor: color }}
-                    />
+                    <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: color }} />
                     {s.label}
                   </button>
                 );
@@ -210,23 +206,6 @@ export default function MapPage() {
             </div>
           </div>
 
-          {/* Geocoding controls */}
-          {geocodingCount > 0 ? (
-            <div className="shrink-0 px-3 py-1.5 bg-amber-50 border-b border-amber-200 text-[10px] text-amber-700">
-              Geocoding {geocodingCount} client{geocodingCount !== 1 ? "s" : ""}...
-            </div>
-          ) : needsGeocodingCount > 0 ? (
-            <div className="shrink-0 px-3 py-1.5 border-b border-border flex items-center justify-between">
-              <span className="text-[10px] text-muted">{needsGeocodingCount} without coordinates</span>
-              <button
-                onClick={handleGeocodeAll}
-                className="text-[10px] px-2 py-0.5 rounded bg-accent text-white hover:bg-blue-600 active:scale-95 font-medium"
-              >
-                Geocode All
-              </button>
-            </div>
-          ) : null}
-
           {/* Client list */}
           <div className="flex-1 overflow-y-auto">
             {sortedClients.length === 0 ? (
@@ -238,32 +217,50 @@ export default function MapPage() {
                 const color = STATUS_PIN_COLORS[client.status || "lead"] || DEFAULT_PIN_COLOR;
                 const hasCoords = client.lat != null && client.lng != null;
                 const isSelected = client.id === selectedClientId;
+                const isPlacing = client.id === placingClientId;
                 return (
-                  <button
+                  <div
                     key={client.id}
-                    onClick={() => handleSelectClient(client.id)}
-                    className={`w-full text-left px-3 py-2 border-b border-gray-50 transition-colors ${
-                      isSelected
-                        ? "bg-accent/10 border-l-2 border-l-accent"
-                        : "hover:bg-gray-50 active:bg-gray-100"
+                    className={`border-b border-gray-50 transition-colors ${
+                      isSelected ? "bg-accent/10 border-l-2 border-l-accent" : ""
                     }`}
                   >
-                    <div className="flex items-center gap-2">
-                      <span
-                        className="w-2.5 h-2.5 rounded-full shrink-0"
-                        style={{ backgroundColor: color }}
-                      />
-                      <div className="flex-1 min-w-0">
-                        <div className="text-xs font-medium truncate">{client.name}</div>
-                        {client.company && (
-                          <div className="text-[10px] text-gray-400 truncate">{client.company}</div>
+                    <button
+                      onClick={() => handleSelectClient(client.id)}
+                      className={`w-full text-left px-3 py-2 transition-colors ${
+                        !isSelected ? "hover:bg-gray-50 active:bg-gray-100" : ""
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="w-2.5 h-2.5 rounded-full shrink-0"
+                          style={{ backgroundColor: color }}
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="text-xs font-medium truncate">{client.name}</div>
+                          {client.company && (
+                            <div className="text-[10px] text-gray-400 truncate">{client.company}</div>
+                          )}
+                        </div>
+                        {!hasCoords && !isPlacing && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleStartPlacing(client.id);
+                            }}
+                            className="text-[8px] px-1.5 py-0.5 rounded border border-blue-200 text-blue-500 hover:bg-blue-50 active:scale-95 font-medium shrink-0"
+                          >
+                            Place
+                          </button>
+                        )}
+                        {isPlacing && (
+                          <span className="text-[8px] text-blue-500 font-medium shrink-0 animate-pulse">
+                            Tap map...
+                          </span>
                         )}
                       </div>
-                      {!hasCoords && (
-                        <span className="text-[8px] text-gray-300 shrink-0">No loc</span>
-                      )}
-                    </div>
-                  </button>
+                    </button>
+                  </div>
                 );
               })
             )}
@@ -276,6 +273,8 @@ export default function MapPage() {
             clients={mappableClients}
             selectedClientId={selectedClientId}
             onSelectClient={handleSelectClient}
+            placingClientId={placingClientId}
+            onPlaceClient={handlePlaceClient}
           />
         </div>
       </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useMemo } from "react";
+import { useEffect, useRef, useMemo, useCallback } from "react";
 import { Client, CLIENT_STATUSES } from "@/lib/types";
 import {
   STATUS_PIN_COLORS,
@@ -14,13 +14,29 @@ interface MapViewProps {
   clients: Client[];
   selectedClientId: string | null;
   onSelectClient: (id: string | null) => void;
+  placingClientId: string | null;
+  onPlaceClient: (clientId: string, lat: number, lng: number) => void;
 }
 
-export default function MapView({ clients, selectedClientId, onSelectClient }: MapViewProps) {
+export default function MapView({
+  clients,
+  selectedClientId,
+  onSelectClient,
+  placingClientId,
+  onPlaceClient,
+}: MapViewProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const markersRef = useRef<Map<string, L.Marker>>(new Map());
   const leafletRef = useRef<typeof import("leaflet") | null>(null);
+  const placingRef = useRef<string | null>(null);
+  const onPlaceRef = useRef(onPlaceClient);
+  onPlaceRef.current = onPlaceClient;
+
+  // Keep placing ref in sync
+  useEffect(() => {
+    placingRef.current = placingClientId;
+  }, [placingClientId]);
 
   // Clients with coordinates
   const mappableClients = useMemo(
@@ -59,6 +75,13 @@ export default function MapView({ clients, selectedClientId, onSelectClient }: M
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
         maxZoom: 19,
       }).addTo(map);
+
+      // Click to place a client pin
+      map.on("click", (e: L.LeafletMouseEvent) => {
+        if (placingRef.current) {
+          onPlaceRef.current(placingRef.current, e.latlng.lat, e.latlng.lng);
+        }
+      });
 
       mapRef.current = map;
 
@@ -105,6 +128,13 @@ export default function MapView({ clients, selectedClientId, onSelectClient }: M
       if (marker) marker.openPopup();
     }
   }, [selectedClientId, mappableClients]);
+
+  // Change cursor when in placing mode
+  useEffect(() => {
+    const container = mapContainerRef.current;
+    if (!container) return;
+    container.style.cursor = placingClientId ? "crosshair" : "";
+  }, [placingClientId]);
 
   function addMarkers(
     L: typeof import("leaflet"),
