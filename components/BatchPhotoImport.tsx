@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { AppEvent, Client } from "@/lib/types";
+import { AppEvent, Client, Attachment } from "@/lib/types";
 import { batchMatchPhotos, PhotoMatchResult, PhotoSegment } from "@/lib/photo-matcher";
 import { addEvent } from "@/lib/event-store";
+import { saveAttachments as dbSaveAttachments } from "@/lib/attachment-store";
 
 interface BatchPhotoImportProps {
   events: AppEvent[];
@@ -46,14 +47,22 @@ export default function BatchPhotoImport({
         const count = seg.attachments.length;
         const label = `${count} Photo${count !== 1 ? "s" : ""} — ${timeStr}`;
 
+        // Strip dataUrls for localStorage (keep event small)
+        const strippedAtts: Attachment[] = seg.attachments.map(({ dataUrl, ...rest }) => ({ ...rest, dataUrl: "" }));
+
         const newEvent = addEvent({
           type: "photo",
           date: seg.date,
           startTime: `${String(seg.startTime.getHours()).padStart(2, "0")}:${String(seg.startTime.getMinutes()).padStart(2, "0")}`,
           label,
-          attachments: seg.attachments,
+          attachments: strippedAtts,
         });
-        created.push(newEvent);
+
+        // Save full photo data to IndexedDB
+        await dbSaveAttachments(newEvent.id, seg.attachments);
+
+        // Keep full dataUrls in memory for display
+        created.push({ ...newEvent, attachments: seg.attachments });
       }
 
       if (created.length > 0) {

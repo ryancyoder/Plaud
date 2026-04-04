@@ -350,7 +350,7 @@ export default function Dashboard() {
             </svg>
           </button>
           <ImportButton onImport={handleImport} />
-          <BatchPhotoImport events={events} clients={clients} onPhotosMatched={handleBatchPhotos} onEventsCreated={(created) => setEvents(loadEvents())} />
+          <BatchPhotoImport events={events} clients={clients} onPhotosMatched={handleBatchPhotos} onEventsCreated={(created) => setEvents((prev) => [...prev, ...created])} />
           {events.length > 0 && (
             <button
               onClick={handleClearData}
