@@ -83,13 +83,17 @@ export default function Dashboard() {
 
   const currentWeek = getWeekDates(weekOffset);
 
-  // Keep selectedDate in sync with week navigation
+  // Keep week header in sync with selected date
   useEffect(() => {
     if (!currentWeek.includes(selectedDate)) {
-      const todayInWeek = currentWeek.find((d) => isToday(d));
-      setSelectedDate(todayInWeek || currentWeek[0]);
+      const targetMs = new Date(selectedDate + "T00:00:00").getTime();
+      const now = new Date();
+      const day = now.getDay();
+      const mondayMs = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (day === 0 ? 6 : day - 1)).getTime();
+      const diffWeeks = Math.floor((targetMs - mondayMs) / (7 * 24 * 60 * 60 * 1000));
+      setWeekOffset(diffWeeks);
     }
-  }, [currentWeek, selectedDate]);
+  }, [selectedDate, currentWeek]);
 
   // Filter events by selected client
   const visibleEvents = useMemo(() => {
