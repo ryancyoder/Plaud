@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 import { importParsedSegments, importFromText, addEvent } from "@/lib/event-store";
 import { srtToSegments, ParsedTranscript } from "@/lib/srt-parser";
 import { AppEvent, Attachment, Client } from "@/lib/types";
-import { batchMatchPhotos, PhotoMatchResult, PhotoSegment } from "@/lib/photo-matcher";
+import { batchMatchPhotos, PhotoMatchResult, PhotoSegment, GpsCoords, reverseGeocode, findClosestClient } from "@/lib/photo-matcher";
 import { saveAttachments as dbSaveAttachments } from "@/lib/attachment-store";
 
 interface ImportButtonProps {
@@ -76,6 +76,8 @@ export default function ImportButton({
     diagnostics: { fileTypes: Record<string, number>; gpsFound: number; gpsTotal: number };
   } | null>(null);
   const [pendingImageFiles, setPendingImageFiles] = useState<FileList | null>(null);
+  const [fallbackLocation, setFallbackLocation] = useState<GpsCoords | null>(null);
+  const [locationStatus, setLocationStatus] = useState<"idle" | "loading" | "granted" | "denied">("idle");
 
   function todayStr() {
     const d = new Date();
@@ -123,6 +125,19 @@ export default function ImportButton({
 
       if (result.matched.length > 0) {
         onPhotosMatched?.(result.matched);
+      }
+
+      // Apply fallback location to segments without GPS
+      if (fallbackLocation) {
+        for (const seg of result.unmatchedSegments) {
+          if (!seg.gps) {
+            seg.gps = fallbackLocation;
+            try {
+              seg.address = await reverseGeocode(fallbackLocation);
+            } catch { /* skip */ }
+            seg.matchedClient = findClosestClient(fallbackLocation, clients);
+          }
+        }
       }
 
       const created: AppEvent[] = [];
@@ -174,6 +189,8 @@ export default function ImportButton({
     setPhotoError(null);
     setPhotoResults(null);
     setPendingImageFiles(null);
+    setFallbackLocation(null);
+    setLocationStatus("idle");
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
@@ -572,10 +589,53 @@ export default function ImportButton({
                     </div>
                   )}
 
-                  <div className="rounded-lg bg-gray-50 border border-gray-200 p-3">
+                  {/* Location fallback */}
+                  <div className="rounded-lg bg-gray-50 border border-gray-200 p-3 space-y-2">
                     <p className="text-[10px] text-muted">
-                      <strong>GPS location</strong> will be extracted from photo metadata to name events by address and auto-assign to clients with matching locations.
+                      GPS will be extracted from photo EXIF. If photos lack location data, use your current location as fallback.
                     </p>
+                    {fallbackLocation ? (
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full">
+                          Current location: {fallbackLocation.lat.toFixed(4)}, {fallbackLocation.lng.toFixed(4)}
+                        </span>
+                        <button
+                          onClick={() => { setFallbackLocation(null); setLocationStatus("idle"); }}
+                          className="text-[10px] text-red-500 hover:text-red-700"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => {
+                          setLocationStatus("loading");
+                          navigator.geolocation.getCurrentPosition(
+                            (pos) => {
+                              setFallbackLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+                              setLocationStatus("granted");
+                            },
+                            () => setLocationStatus("denied"),
+                            { enableHighAccuracy: true, timeout: 10000 },
+                          );
+                        }}
+                        disabled={locationStatus === "loading"}
+                        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-medium bg-white border border-border text-foreground hover:bg-gray-50 active:scale-95 disabled:opacity-50"
+                      >
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <circle cx="12" cy="12" r="10" />
+                          <circle cx="12" cy="12" r="3" />
+                          <line x1="12" y1="2" x2="12" y2="6" />
+                          <line x1="12" y1="18" x2="12" y2="22" />
+                          <line x1="2" y1="12" x2="6" y2="12" />
+                          <line x1="18" y1="12" x2="22" y2="12" />
+                        </svg>
+                        {locationStatus === "loading" ? "Getting location..." : "Use Current Location"}
+                      </button>
+                    )}
+                    {locationStatus === "denied" && (
+                      <p className="text-[10px] text-red-500">Location access denied. Check browser/device settings.</p>
+                    )}
                   </div>
                 </>
               )}

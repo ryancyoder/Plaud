@@ -22,7 +22,6 @@ export interface PhotoMetadata {
  */
 export async function getPhotoMetadata(file: File): Promise<PhotoMetadata> {
   try {
-    // Try JPEG EXIF first (also works for JPEG-converted HEIC)
     const exif = await readExifData(file);
     if (exif.date || exif.gps) {
       return {
@@ -33,23 +32,6 @@ export async function getPhotoMetadata(file: File): Promise<PhotoMetadata> {
   } catch {
     // fall through
   }
-
-  // Try HEIC/HEIF ISOBMFF container
-  if (file.type === "image/heic" || file.type === "image/heif" ||
-      file.name.toLowerCase().endsWith(".heic") || file.name.toLowerCase().endsWith(".heif")) {
-    try {
-      const exif = await readHeicExif(file);
-      if (exif.date || exif.gps) {
-        return {
-          timestamp: exif.date || new Date(file.lastModified),
-          gps: exif.gps,
-        };
-      }
-    } catch {
-      // fall through
-    }
-  }
-
   return { timestamp: new Date(file.lastModified), gps: null };
 }
 
@@ -65,119 +47,120 @@ interface ExifData {
   gps: GpsCoords | null;
 }
 
+/**
+ * Unified EXIF reader. Works for JPEG, HEIC, and any format that
+ * contains a TIFF-structured EXIF block. Uses brute-force scan for
+ * the "Exif\0\0" + TIFF header pattern anywhere in the first 512KB.
+ * This handles JPEG APP1, HEIC ISOBMFF, and edge cases like
+ * multiple APP1 markers or non-standard containers.
+ */
 async function readExifData(file: File): Promise<ExifData> {
-  const buffer = await file.slice(0, 128 * 1024).arrayBuffer();
-  const view = new DataView(buffer);
+  const buffer = await file.slice(0, 512 * 1024).arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  const fullView = new DataView(buffer);
 
-  if (view.getUint16(0) !== 0xffd8) return { date: null, gps: null };
-
-  let offset = 2;
-  while (offset < view.byteLength - 4) {
-    const marker = view.getUint16(offset);
-    if (marker === 0xffe1) {
-      const exifStart = offset + 4;
-      const exifHeader = String.fromCharCode(
-        view.getUint8(exifStart),
-        view.getUint8(exifStart + 1),
-        view.getUint8(exifStart + 2),
-        view.getUint8(exifStart + 3),
-      );
-      if (exifHeader !== "Exif") return { date: null, gps: null };
-
-      const tiffStart = exifStart + 6;
-      const byteOrder = view.getUint16(tiffStart);
-      const le = byteOrder === 0x4949;
-
-      const ifdOffset = view.getUint32(tiffStart + 4, le);
-      const ifd0Start = tiffStart + ifdOffset;
-
-      // Date from IFD0
-      let date: Date | null = null;
-      const dateStr = findDateInIFD(view, tiffStart, ifd0Start, le);
-      if (dateStr) date = parseExifDateString(dateStr);
-
-      // Date from Exif sub-IFD (has DateTimeOriginal)
-      if (!date) {
-        const exifIfdOff = findTagValue(view, tiffStart, ifd0Start, le, 0x8769);
-        if (exifIfdOff !== null) {
-          const dateStr2 = findDateInIFD(view, tiffStart, tiffStart + exifIfdOff, le);
-          if (dateStr2) date = parseExifDateString(dateStr2);
-        }
-      }
-
-      // GPS from GPS IFD (tag 0x8825 in IFD0)
-      let gps: GpsCoords | null = null;
-      const gpsIfdOff = findTagValue(view, tiffStart, ifd0Start, le, 0x8825);
-      if (gpsIfdOff !== null) {
-        gps = readGpsFromIFD(view, tiffStart, tiffStart + gpsIfdOff, le);
-      }
-
-      return { date, gps };
-    } else if ((marker & 0xff00) === 0xff00) {
-      const segLen = view.getUint16(offset + 2);
-      offset += 2 + segLen;
-    } else {
-      break;
+  // Strategy 1: Brute-force scan for "Exif\0\0" pattern
+  // Works for JPEG, HEIC, and any container
+  for (let i = 0; i < bytes.length - 20; i++) {
+    if (bytes[i] === 0x45 && bytes[i + 1] === 0x78 &&
+        bytes[i + 2] === 0x69 && bytes[i + 3] === 0x66 &&
+        bytes[i + 4] === 0x00 && bytes[i + 5] === 0x00) {
+      const result = parseTiffBlock(fullView, i + 6);
+      if (result.date || result.gps) return result;
     }
   }
+
+  // Strategy 2: For JPEG, try each APP1 marker properly
+  // (some JPEGs skip the "Exif\0\0" header)
+  if (bytes.length >= 2 && bytes[0] === 0xFF && bytes[1] === 0xD8) {
+    let offset = 2;
+    while (offset < bytes.length - 4) {
+      const marker = fullView.getUint16(offset);
+      if (marker === 0xFFE1) {
+        const segLen = fullView.getUint16(offset + 2);
+        const segStart = offset + 4;
+        // Check if this APP1 has TIFF header directly (II or MM)
+        if (segStart + 8 < bytes.length) {
+          const bo = fullView.getUint16(segStart);
+          if (bo === 0x4949 || bo === 0x4D4D) {
+            const result = parseTiffBlock(fullView, segStart);
+            if (result.date || result.gps) return result;
+          }
+          // Also try offset +6 (after "Exif\0\0" which we may have missed)
+          if (segStart + 14 < bytes.length) {
+            const bo2 = fullView.getUint16(segStart + 6);
+            if (bo2 === 0x4949 || bo2 === 0x4D4D) {
+              const result = parseTiffBlock(fullView, segStart + 6);
+              if (result.date || result.gps) return result;
+            }
+          }
+        }
+        offset += 2 + segLen;
+      } else if ((marker & 0xFF00) === 0xFF00) {
+        const segLen = fullView.getUint16(offset + 2);
+        offset += 2 + segLen;
+      } else {
+        break;
+      }
+    }
+  }
+
+  // Strategy 3: Brute-force scan for TIFF header ("II*\0" or "MM\0*")
+  // Last resort — some files embed TIFF without "Exif" marker
+  for (let i = 0; i < bytes.length - 20; i++) {
+    const bo = fullView.getUint16(i);
+    if (bo !== 0x4949 && bo !== 0x4D4D) continue;
+    const le = bo === 0x4949;
+    const magic = fullView.getUint16(i + 2, le);
+    if (magic !== 42) continue;
+    // Found a TIFF header — try parsing
+    const result = parseTiffBlock(fullView, i);
+    if (result.date || result.gps) return result;
+  }
+
   return { date: null, gps: null };
 }
 
 /**
- * Extract EXIF from HEIC/HEIF files (ISOBMFF container).
- * Scans for the "Exif" marker in the binary data — HEIC stores EXIF as
- * a standard TIFF payload inside an 'Exif' item property box.
+ * Parse a TIFF block starting at tiffStart in the DataView.
+ * Returns date and GPS if found.
  */
-async function readHeicExif(file: File): Promise<ExifData> {
-  // Read more for HEIC since the EXIF box can be deeper in the file
-  const buffer = await file.slice(0, 512 * 1024).arrayBuffer();
-  const bytes = new Uint8Array(buffer);
+function parseTiffBlock(view: DataView, tiffStart: number): ExifData {
+  if (tiffStart + 8 > view.byteLength) return { date: null, gps: null };
 
-  // Scan for "Exif\0\0" followed by TIFF header ("II" or "MM")
-  for (let i = 0; i < bytes.length - 14; i++) {
-    if (bytes[i] === 0x45 && bytes[i + 1] === 0x78 &&
-        bytes[i + 2] === 0x69 && bytes[i + 3] === 0x66 &&
-        bytes[i + 4] === 0x00 && bytes[i + 5] === 0x00) {
-      // Found "Exif\0\0" — TIFF header starts right after
-      const tiffStart = i + 6;
-      const view = new DataView(buffer, tiffStart);
-      if (view.byteLength < 8) continue;
+  const byteOrder = view.getUint16(tiffStart);
+  if (byteOrder !== 0x4949 && byteOrder !== 0x4D4D) return { date: null, gps: null };
+  const le = byteOrder === 0x4949;
 
-      const byteOrder = view.getUint16(0);
-      if (byteOrder !== 0x4949 && byteOrder !== 0x4d4d) continue;
-      const le = byteOrder === 0x4949;
+  const magic = view.getUint16(tiffStart + 2, le);
+  if (magic !== 42) return { date: null, gps: null };
 
-      const magic = view.getUint16(2, le);
-      if (magic !== 42) continue;
+  const ifdOffset = view.getUint32(tiffStart + 4, le);
+  const ifd0Start = tiffStart + ifdOffset;
+  if (ifd0Start + 2 > view.byteLength) return { date: null, gps: null };
 
-      // Valid TIFF header — parse it using our existing helpers
-      // Create a view for the entire tiff block
-      const tiffView = new DataView(buffer);
-      const ifdOffset = view.getUint32(4, le);
-      const ifd0Start = tiffStart + ifdOffset;
+  // Date from IFD0
+  let date: Date | null = null;
+  const dateStr = findDateInIFD(view, tiffStart, ifd0Start, le);
+  if (dateStr) date = parseExifDateString(dateStr);
 
-      let date: Date | null = null;
-      const dateStr = findDateInIFD(tiffView, tiffStart, ifd0Start, le);
-      if (dateStr) date = parseExifDateString(dateStr);
-
-      if (!date) {
-        const exifIfdOff = findTagValue(tiffView, tiffStart, ifd0Start, le, 0x8769);
-        if (exifIfdOff !== null) {
-          const dateStr2 = findDateInIFD(tiffView, tiffStart, tiffStart + exifIfdOff, le);
-          if (dateStr2) date = parseExifDateString(dateStr2);
-        }
-      }
-
-      let gps: GpsCoords | null = null;
-      const gpsIfdOff = findTagValue(tiffView, tiffStart, ifd0Start, le, 0x8825);
-      if (gpsIfdOff !== null) {
-        gps = readGpsFromIFD(tiffView, tiffStart, tiffStart + gpsIfdOff, le);
-      }
-
-      if (date || gps) return { date, gps };
+  // Date from Exif sub-IFD
+  if (!date) {
+    const exifIfdOff = findTagValue(view, tiffStart, ifd0Start, le, 0x8769);
+    if (exifIfdOff !== null) {
+      const dateStr2 = findDateInIFD(view, tiffStart, tiffStart + exifIfdOff, le);
+      if (dateStr2) date = parseExifDateString(dateStr2);
     }
   }
-  return { date: null, gps: null };
+
+  // GPS from GPS IFD
+  let gps: GpsCoords | null = null;
+  const gpsIfdOff = findTagValue(view, tiffStart, ifd0Start, le, 0x8825);
+  if (gpsIfdOff !== null) {
+    gps = readGpsFromIFD(view, tiffStart, tiffStart + gpsIfdOff, le);
+  }
+
+  return { date, gps };
 }
 
 /**
