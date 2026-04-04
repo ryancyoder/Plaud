@@ -610,8 +610,6 @@ function DocumentList({
   const [blobUrls, setBlobUrls] = useState<Record<string, string>>({});
   const [markupHint, setMarkupHint] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const reimportInputRef = useRef<HTMLInputElement>(null);
-  const reimportEventIdRef = useRef<string | null>(null);
 
   // Clean up blob URLs on unmount
   useEffect(() => {
@@ -702,46 +700,82 @@ function DocumentList({
       const file = new File([blob], doc.name, { type: doc.mimeType });
       if (navigator.share && navigator.canShare?.({ files: [file] })) {
         await navigator.share({ files: [file], title: doc.name });
-        // After share completes, show re-import hint
-        setMarkupHint(doc.eventId);
-        setTimeout(() => setMarkupHint(null), 15000);
+        // After share completes, show paste hint
+        setMarkupHint(doc.id);
       } else {
-        // Fallback: open in new tab
         window.open(url, "_blank");
-        setMarkupHint(doc.eventId);
-        setTimeout(() => setMarkupHint(null), 15000);
+        setMarkupHint(doc.id);
       }
     } catch {
       // User cancelled share — ignore
     }
   }, [getBlobUrl]);
 
-  // Re-import annotated file back into the event
-  const handleReimport = useCallback((eventId: string) => {
-    reimportEventIdRef.current = eventId;
-    reimportInputRef.current?.click();
-  }, []);
+  // Paste annotated PDF from clipboard, replacing the original
+  const handlePasteReplace = useCallback(async (doc: Attachment & { eventId: string }) => {
+    try {
+      const items = await navigator.clipboard.read();
+      let blob: Blob | null = null;
+      let mimeType = "";
 
-  const handleReimportFile = useCallback((files: FileList | null) => {
-    if (!files || files.length === 0 || !reimportEventIdRef.current) return;
-    const eventId = reimportEventIdRef.current;
-    handleFileAttach(files, eventId, onAddAttachments);
-    setMarkupHint(null);
-    reimportEventIdRef.current = null;
-  }, [onAddAttachments]);
+      for (const item of items) {
+        // Look for PDF first, then images
+        for (const type of item.types) {
+          if (type === "application/pdf" || type.startsWith("image/")) {
+            blob = await item.getType(type);
+            mimeType = type;
+            break;
+          }
+        }
+        if (blob) break;
+      }
+
+      if (!blob) {
+        setMarkupHint(null);
+        alert("No PDF or image found on clipboard. Copy the annotated file first.");
+        return;
+      }
+
+      // Convert blob to data URL
+      const dataUrl = await new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.readAsDataURL(blob);
+      });
+
+      // Build replacement attachment with same ID (replaces in-place)
+      const replacement: Attachment = {
+        id: doc.id,
+        name: doc.name.replace(/(\.\w+)$/, "-annotated$1"),
+        type: "document",
+        mimeType: mimeType || doc.mimeType,
+        dataUrl,
+        timestamp: new Date().toISOString(),
+      };
+
+      // Remove old, add new
+      onRemoveAttachment(doc.eventId, doc.id);
+      onAddAttachments(doc.eventId, [replacement]);
+
+      // Clear blob URL cache for this doc
+      if (blobUrls[doc.id]) {
+        URL.revokeObjectURL(blobUrls[doc.id]);
+        setBlobUrls((prev) => {
+          const next = { ...prev };
+          delete next[doc.id];
+          return next;
+        });
+      }
+
+      setMarkupHint(null);
+    } catch (err) {
+      // Clipboard permission denied or read failed
+      alert("Could not read clipboard. Make sure you copied the annotated file.");
+    }
+  }, [onRemoveAttachment, onAddAttachments, blobUrls]);
 
   return (
     <div className="p-3">
-      {/* Hidden file input for re-importing annotated files */}
-      <input
-        ref={reimportInputRef}
-        type="file"
-        accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.csv,image/*"
-        multiple
-        className="hidden"
-        onChange={(e) => { handleReimportFile(e.target.files); e.target.value = ""; }}
-      />
-
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-xs font-semibold">{heading}</h3>
         {canUpload && (
@@ -816,17 +850,25 @@ function DocumentList({
                 </div>
               </div>
 
-              {/* Re-import hint after Markup */}
-              {markupHint === doc.eventId && (
-                <div className="mt-1 p-2.5 rounded-lg bg-purple-50 border border-purple-200">
-                  <p className="text-[11px] text-purple-700 mb-2">
-                    Done annotating? Save to Files in the share sheet, then tap below to bring it back.
+              {/* Paste annotated version back */}
+              {markupHint === doc.id && (
+                <div className="mt-1 p-2.5 rounded-lg bg-purple-50 border border-purple-200 flex items-center gap-3">
+                  <p className="text-[11px] text-purple-700 flex-1">
+                    Copy annotated file, then paste it back:
                   </p>
                   <button
-                    onClick={() => handleReimport(doc.eventId)}
-                    className="text-[11px] px-3 py-1.5 rounded-lg bg-purple-600 text-white font-medium hover:bg-purple-700 active:scale-95"
+                    onClick={() => handlePasteReplace(doc)}
+                    className="text-[11px] px-3 py-1.5 rounded-lg bg-purple-600 text-white font-medium hover:bg-purple-700 active:scale-95 shrink-0"
                   >
-                    Import Annotated File
+                    Paste &amp; Replace
+                  </button>
+                  <button
+                    onClick={() => setMarkupHint(null)}
+                    className="text-muted hover:text-foreground shrink-0"
+                  >
+                    <svg width="12" height="12" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M5 5l10 10M15 5L5 15" />
+                    </svg>
                   </button>
                 </div>
               )}
