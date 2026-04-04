@@ -261,6 +261,7 @@ export async function batchMatchPhotos(
   files: FileList,
   events: AppEvent[],
   gapMinutes = 30,
+  bufferMinutes = 15,
 ): Promise<BatchMatchResult> {
   const matched: Map<string, PhotoMatchResult> = new Map();
   const unmatchedRaw: { attachment: Attachment; timestamp: Date }[] = [];
@@ -281,7 +282,7 @@ export async function batchMatchPhotos(
       timestamp: timestamp.toISOString(),
     };
 
-    const match = matchPhotoToEvent(timestamp, events);
+    const match = matchPhotoToEvent(timestamp, events, bufferMinutes);
     if (match) {
       const existing = matched.get(match.id);
       if (existing) {
