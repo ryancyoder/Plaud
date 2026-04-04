@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { Client, ClientStatus, CLIENT_STATUSES, Transcript, ClientEvent, ClientEventType, CLIENT_EVENT_TYPES } from "@/lib/types";
 import { loadClients, saveClients, updateClientStatus, deleteClient, updateClient } from "@/lib/clients";
 import { loadTranscripts } from "@/lib/store";
@@ -511,7 +511,7 @@ function ClientViewer({ client, transcripts, onDelete, onUpdate }: {
 
       {/* Timeline + Recordings */}
       <div className="flex-1 overflow-y-auto flex flex-col">
-        <ClientTimeline client={client} />
+        <ClientTimeline client={client} transcripts={transcripts} />
 
         {/* Recordings */}
         <div className="border-t border-border">
@@ -578,6 +578,8 @@ function EventIcon({ type, size = 14 }: { type: ClientEventType; size?: number }
       return <svg {...props}><line x1="12" y1="1" x2="12" y2="23" /><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6" /></svg>;
     case "note":
       return <svg {...props}><path d="M17 3a2.85 2.85 0 114 4L7.5 20.5 2 22l1.5-5.5Z" /></svg>;
+    case "recording":
+      return <svg {...props}><path d="M12 2a3 3 0 00-3 3v7a3 3 0 006 0V5a3 3 0 00-3-3Z" /><path d="M19 10v2a7 7 0 01-14 0v-2" /><line x1="12" y1="19" x2="12" y2="22" /></svg>;
     default:
       return <svg {...props}><circle cx="12" cy="12" r="4" /></svg>;
   }
@@ -585,7 +587,7 @@ function EventIcon({ type, size = 14 }: { type: ClientEventType; size?: number }
 
 // --- Client Timeline ---
 
-function ClientTimeline({ client }: { client: Client }) {
+function ClientTimeline({ client, transcripts }: { client: Client; transcripts: Transcript[] }) {
   const [events, setEvents] = useState<ClientEvent[]>([]);
   const [showAdd, setShowAdd] = useState(false);
   const [newType, setNewType] = useState<ClientEventType>("phone-call");
@@ -606,6 +608,19 @@ function ClientTimeline({ client }: { client: Client }) {
       setEvents(stored);
     }
   }
+
+  // Merge stored events with recording events from transcripts
+  const allEvents = useMemo(() => {
+    const recordingEvents: ClientEvent[] = transcripts.map((t) => ({
+      id: `rec-${t.id}`,
+      clientId: client.id,
+      type: "recording" as ClientEventType,
+      date: new Date(`${t.date}T${t.startTime}:00`).toISOString(),
+      label: t.title,
+      auto: true,
+    }));
+    return [...events, ...recordingEvents].sort((a, b) => a.date.localeCompare(b.date));
+  }, [events, transcripts, client.id]);
 
   function handleAdd() {
     if (!newLabel.trim()) return;
@@ -638,6 +653,7 @@ function ClientTimeline({ client }: { client: Client }) {
     "delivery": "text-orange-600 bg-orange-50 border-orange-200",
     "payment": "text-emerald-600 bg-emerald-50 border-emerald-200",
     "note": "text-gray-600 bg-gray-50 border-gray-200",
+    "recording": "text-rose-600 bg-rose-50 border-rose-200",
   };
 
   return (
@@ -692,7 +708,7 @@ function ClientTimeline({ client }: { client: Client }) {
       )}
 
       {/* Timeline visualization */}
-      {events.length === 0 ? (
+      {allEvents.length === 0 ? (
         <div className="text-center text-[10px] text-gray-300 py-4">No events yet</div>
       ) : (
         <div className="relative">
@@ -700,7 +716,8 @@ function ClientTimeline({ client }: { client: Client }) {
           <div className="absolute left-0 right-0 top-[15px] h-px bg-gray-200" />
 
           <div className="flex gap-0 overflow-x-auto pb-2" style={{ minHeight: 70 }}>
-            {events.map((ev, idx) => {
+            {allEvents.map((ev) => {
+              const isRecording = ev.type === "recording";
               const colors = eventTypeColors[ev.type] || "text-gray-500 bg-gray-50 border-gray-200";
               const colorParts = colors.split(" ");
               return (
@@ -718,14 +735,16 @@ function ClientTimeline({ client }: { client: Client }) {
                   {/* Label */}
                   <div className="text-[9px] text-center leading-tight mt-0.5 max-w-[60px] truncate">{ev.label}</div>
 
-                  {/* Hover delete for non-auto or any event */}
-                  <button
-                    onClick={() => handleDelete(ev.id)}
-                    className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-white items-center justify-center text-[8px] hidden group-hover:flex z-20"
-                    title="Remove event"
-                  >
-                    &times;
-                  </button>
+                  {/* Hover delete — not for recording events (managed via transcript list) */}
+                  {!isRecording && (
+                    <button
+                      onClick={() => handleDelete(ev.id)}
+                      className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-white items-center justify-center text-[8px] hidden group-hover:flex z-20"
+                      title="Remove event"
+                    >
+                      &times;
+                    </button>
+                  )}
                 </div>
               );
             })}

@@ -49,7 +49,8 @@ export type ClientEventType =
   | "contract"
   | "delivery"
   | "payment"
-  | "note";
+  | "note"
+  | "recording";
 
 export const CLIENT_EVENT_TYPES: { key: ClientEventType; label: string; icon: string }[] = [
   { key: "site-visit", label: "Site Visit", icon: "house" },
@@ -62,6 +63,7 @@ export const CLIENT_EVENT_TYPES: { key: ClientEventType; label: string; icon: st
   { key: "delivery", label: "Delivery", icon: "truck" },
   { key: "payment", label: "Payment", icon: "dollar" },
   { key: "note", label: "Note", icon: "pencil" },
+  { key: "recording", label: "Recording", icon: "mic" },
 ];
 
 export interface ClientEvent {
