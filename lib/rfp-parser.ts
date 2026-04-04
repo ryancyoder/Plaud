@@ -70,6 +70,8 @@ export function parseRfpClipboard(text: string): ParsedRfp {
       } else {
         name = firstLine;
       }
+      // Strip trailing dashes/separators left over after phone removal (e.g. "Name -- ")
+      name = name.replace(/[-–—\s]+$/, "").trim();
       continue;
     }
 
@@ -106,8 +108,9 @@ export function parseRfpClipboard(text: string): ParsedRfp {
       collectingAddress = false;
     }
 
-    // Email line
-    const emailMatch = line.match(emailPattern);
+    // Email line — strip <mailto:...> tags before matching
+    const cleanedLine = line.replace(/<mailto:[^>]*>/gi, "");
+    const emailMatch = cleanedLine.match(emailPattern);
     if (emailMatch) {
       email = emailMatch[1].toLowerCase();
       continue;
