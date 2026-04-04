@@ -5,7 +5,7 @@ import { AppEvent, Attachment, Client } from "@/lib/types";
 import { formatDuration, getTagColor, formatDate } from "@/lib/utils";
 import { hasApiKey, getCachedSegmentSummary, generateSegmentSummary, getCachedSummary, generateDailySummary } from "@/lib/claude-api";
 
-type Tab = "transcript" | "photos";
+type Tab = "transcript" | "photos" | "documents";
 type ViewMode = "event" | "client-aggregate" | "day-aggregate";
 
 interface ViewerPanelProps {
@@ -35,20 +35,33 @@ export default function ViewerPanel({
 }: ViewerPanelProps) {
   const [activeTab, setActiveTab] = useState<Tab>("transcript");
 
-  // Photo count depends on mode
-  const photoCount = useMemo(() => {
+  // Attachment counts depend on mode
+  const { photoCount, docCount } = useMemo(() => {
+    const countFrom = (atts: Attachment[] | undefined) => {
+      const photos = atts?.filter((a) => a.mimeType.startsWith("image/")).length ?? 0;
+      const docs = atts?.filter((a) => !a.mimeType.startsWith("image/")).length ?? 0;
+      return { photos, docs };
+    };
     if (viewMode === "event" && selectedEvent) {
-      return selectedEvent.attachments?.filter((a) => a.mimeType.startsWith("image/")).length ?? 0;
+      const c = countFrom(selectedEvent.attachments);
+      return { photoCount: c.photos, docCount: c.docs };
     }
     if (viewMode === "client-aggregate" || viewMode === "day-aggregate") {
-      return aggregateEvents.reduce((n, ev) => n + (ev.attachments?.filter((a) => a.mimeType.startsWith("image/")).length ?? 0), 0);
+      let photos = 0, docs = 0;
+      for (const ev of aggregateEvents) {
+        const c = countFrom(ev.attachments);
+        photos += c.photos;
+        docs += c.docs;
+      }
+      return { photoCount: photos, docCount: docs };
     }
-    return 0;
+    return { photoCount: 0, docCount: 0 };
   }, [viewMode, selectedEvent, aggregateEvents]);
 
   const tabs: { key: Tab; label: string; count?: number }[] = [
     { key: "transcript", label: viewMode === "event" ? "Detail" : "Overview" },
     { key: "photos", label: "Photos", count: photoCount },
+    { key: "documents", label: "Docs", count: docCount },
   ];
 
   return (
@@ -95,6 +108,16 @@ export default function ViewerPanel({
         )}
         {activeTab === "photos" && (
           <PhotoGallery
+            event={selectedEvent}
+            viewMode={viewMode}
+            selectedClient={selectedClient}
+            aggregateEvents={aggregateEvents}
+            onAddAttachments={onAddAttachments}
+            onRemoveAttachment={onRemoveAttachment}
+          />
+        )}
+        {activeTab === "documents" && (
+          <DocumentList
             event={selectedEvent}
             viewMode={viewMode}
             selectedClient={selectedClient}
@@ -525,6 +548,184 @@ function handleFileAttach(
     }),
   );
   Promise.all(promises).then((attachments) => onAddAttachments(eventId, attachments));
+}
+
+// --- Documents Tab ---
+
+function DocumentList({
+  event,
+  viewMode,
+  selectedClient,
+  aggregateEvents,
+  onAddAttachments,
+  onRemoveAttachment,
+}: {
+  event: AppEvent | null;
+  viewMode: ViewMode;
+  selectedClient: Client | null;
+  aggregateEvents: AppEvent[];
+  onAddAttachments: (eventId: string, attachments: Attachment[]) => void;
+  onRemoveAttachment: (eventId: string, attachmentId: string) => void;
+}) {
+  const [previewDoc, setPreviewDoc] = useState<(Attachment & { eventId: string }) | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const docs = useMemo(() => {
+    const isDoc = (a: Attachment) => !a.mimeType.startsWith("image/");
+    if (viewMode === "event" && event) {
+      return (event.attachments || [])
+        .filter(isDoc)
+        .map((a) => ({ ...a, eventId: event.id, eventLabel: event.label, eventDate: event.date }));
+    }
+    if (viewMode === "client-aggregate" || viewMode === "day-aggregate") {
+      const result: (Attachment & { eventId: string; eventLabel: string; eventDate: string })[] = [];
+      for (const ev of aggregateEvents) {
+        for (const att of ev.attachments || []) {
+          if (isDoc(att)) {
+            result.push({ ...att, eventId: ev.id, eventLabel: ev.label, eventDate: ev.date });
+          }
+        }
+      }
+      return result;
+    }
+    return [];
+  }, [viewMode, event, aggregateEvents]);
+
+  const heading = viewMode === "client-aggregate" && selectedClient
+    ? `${selectedClient.name}'s Documents (${docs.length})`
+    : `${docs.length} document${docs.length !== 1 ? "s" : ""}`;
+
+  const canUpload = viewMode === "event" && event;
+
+  const isPdf = (mimeType: string) => mimeType === "application/pdf";
+
+  const getFileIcon = (mimeType: string) => {
+    if (isPdf(mimeType)) return "PDF";
+    if (mimeType.includes("word") || mimeType.includes("document")) return "DOC";
+    if (mimeType.includes("sheet") || mimeType.includes("excel")) return "XLS";
+    if (mimeType.includes("text")) return "TXT";
+    return "FILE";
+  };
+
+  const getFileColor = (mimeType: string) => {
+    if (isPdf(mimeType)) return "bg-red-100 text-red-600 border-red-200";
+    if (mimeType.includes("word") || mimeType.includes("document")) return "bg-blue-100 text-blue-600 border-blue-200";
+    if (mimeType.includes("sheet") || mimeType.includes("excel")) return "bg-green-100 text-green-600 border-green-200";
+    return "bg-gray-100 text-gray-600 border-gray-200";
+  };
+
+  return (
+    <div className="p-3">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-xs font-semibold">{heading}</h3>
+        {canUpload && (
+          <div>
+            <input ref={fileInputRef} type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.csv" multiple className="hidden"
+              onChange={(e) => { const f = e.target.files; if (f && f.length > 0) { handleFileAttach(f, event.id, onAddAttachments); e.target.value = ""; } }} />
+            <button onClick={() => fileInputRef.current?.click()} className="text-[11px] px-3 py-1 rounded-lg bg-accent text-white font-medium hover:bg-blue-600 active:scale-95">+ Add Docs</button>
+          </div>
+        )}
+      </div>
+
+      {docs.length > 0 ? (
+        <div className="space-y-2">
+          {docs.map((doc) => (
+            <div key={doc.id} className="flex items-center gap-3 p-2.5 rounded-lg border border-border hover:bg-gray-50 group">
+              {/* File type badge */}
+              <div className={`shrink-0 w-10 h-10 rounded-lg border flex items-center justify-center text-[10px] font-bold ${getFileColor(doc.mimeType)}`}>
+                {getFileIcon(doc.mimeType)}
+              </div>
+
+              {/* File info */}
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-medium truncate">{doc.name}</p>
+                <p className="text-[10px] text-muted">
+                  {viewMode !== "event" && <span>{doc.eventDate} &middot; </span>}
+                  {doc.mimeType.split("/").pop()?.toUpperCase()}
+                </p>
+              </div>
+
+              {/* Actions */}
+              <div className="flex items-center gap-1.5 shrink-0">
+                {isPdf(doc.mimeType) && (
+                  <button
+                    onClick={() => setPreviewDoc(doc)}
+                    className="text-[10px] px-2 py-1 rounded border border-accent text-accent hover:bg-accent-light active:scale-95 font-medium"
+                  >
+                    View
+                  </button>
+                )}
+                <a
+                  href={doc.dataUrl}
+                  download={doc.name}
+                  className="text-[10px] px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-100 active:scale-95 font-medium"
+                >
+                  Save
+                </a>
+                {viewMode === "event" && event && (
+                  <button
+                    onClick={() => onRemoveAttachment(event.id, doc.id)}
+                    className="text-[10px] px-1.5 py-1 rounded border border-red-200 text-red-400 hover:bg-red-50 active:scale-95 opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    x
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="flex flex-col items-center justify-center py-8 text-gray-300">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="mb-2">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z" />
+            <polyline points="14 2 14 8 20 8" />
+          </svg>
+          <p className="text-xs">No documents</p>
+          {canUpload && (
+            <button onClick={() => fileInputRef.current?.click()} className="text-[10px] text-accent mt-2 hover:underline">
+              Upload a PDF or document
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* PDF Preview Modal */}
+      {previewDoc && isPdf(previewDoc.mimeType) && (
+        <div className="fixed inset-0 z-50 bg-black/80 flex flex-col" onClick={() => setPreviewDoc(null)}>
+          {/* Header bar */}
+          <div className="flex items-center justify-between px-4 py-3 bg-gray-900 shrink-0" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-8 h-8 rounded bg-red-500/20 flex items-center justify-center text-[10px] font-bold text-red-300">PDF</div>
+              <span className="text-sm text-white truncate">{previewDoc.name}</span>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <a
+                href={previewDoc.dataUrl}
+                download={previewDoc.name}
+                className="text-xs px-3 py-1.5 rounded-lg bg-white/10 text-white hover:bg-white/20 active:scale-95"
+                onClick={(e) => e.stopPropagation()}
+              >
+                Download
+              </a>
+              <button onClick={() => setPreviewDoc(null)} className="text-white/70 hover:text-white p-1">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M6 6l12 12M18 6L6 18" />
+                </svg>
+              </button>
+            </div>
+          </div>
+          {/* PDF embed */}
+          <div className="flex-1 min-h-0" onClick={(e) => e.stopPropagation()}>
+            <iframe
+              src={previewDoc.dataUrl}
+              className="w-full h-full border-0"
+              title={previewDoc.name}
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 // --- Photos Tab ---
