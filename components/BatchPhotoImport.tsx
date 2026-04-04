@@ -20,6 +20,7 @@ export default function BatchPhotoImport({
   onEventsCreated,
 }: BatchPhotoImportProps) {
   const [processing, setProcessing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<{
     matched: PhotoMatchResult[];
     createdEvents: AppEvent[];
@@ -29,6 +30,7 @@ export default function BatchPhotoImport({
   const handleFiles = async (files: FileList) => {
     if (files.length === 0) return;
     setProcessing(true);
+    setError(null);
 
     try {
       const result = await batchMatchPhotos(files, events);
@@ -69,12 +71,14 @@ export default function BatchPhotoImport({
         onEventsCreated?.(created);
       }
 
+      // Always show results — even if nothing matched, show the summary
       setResults({
         matched: result.matched,
         createdEvents: created,
       });
     } catch (err) {
       console.error("Batch photo import error:", err);
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setProcessing(false);
     }
@@ -107,6 +111,22 @@ export default function BatchPhotoImport({
         </svg>
         {processing ? "Importing..." : "Photos"}
       </button>
+
+      {/* Error display */}
+      {error && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setError(null)}>
+          <div className="bg-white rounded-xl shadow-xl max-w-sm w-full mx-4 p-4" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-sm font-bold text-red-600 mb-2">Photo Import Error</h2>
+            <p className="text-xs text-gray-600 mb-3 break-words">{error}</p>
+            <button
+              onClick={() => setError(null)}
+              className="w-full py-2 rounded-lg bg-accent text-white text-xs font-medium hover:bg-blue-600"
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Import results modal */}
       {results && (
