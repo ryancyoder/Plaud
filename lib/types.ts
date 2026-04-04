@@ -50,7 +50,8 @@ export type ClientEventType =
   | "delivery"
   | "payment"
   | "note"
-  | "recording";
+  | "recording"
+  | "photo";
 
 export const CLIENT_EVENT_TYPES: { key: ClientEventType; label: string; icon: string }[] = [
   { key: "site-visit", label: "Site Visit", icon: "house" },
@@ -64,6 +65,7 @@ export const CLIENT_EVENT_TYPES: { key: ClientEventType; label: string; icon: st
   { key: "payment", label: "Payment", icon: "dollar" },
   { key: "note", label: "Note", icon: "pencil" },
   { key: "recording", label: "Recording", icon: "mic" },
+  { key: "photo", label: "Photo", icon: "camera" },
 ];
 
 export interface ClientEvent {
@@ -73,6 +75,7 @@ export interface ClientEvent {
   date: string; // ISO date string
   label: string; // short description
   auto?: boolean; // true if system-generated
+  photoUrl?: string; // base64 data URL for photo events
 }
 
 export interface Client {

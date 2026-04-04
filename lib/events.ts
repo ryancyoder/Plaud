@@ -25,7 +25,8 @@ export function addEvent(
   type: ClientEventType,
   date: string,
   label: string,
-  auto?: boolean
+  auto?: boolean,
+  photoUrl?: string
 ): ClientEvent {
   const events = loadEvents();
   const event: ClientEvent = {
@@ -35,6 +36,7 @@ export function addEvent(
     date,
     label,
     auto,
+    photoUrl,
   };
   events.push(event);
   saveEvents(events);

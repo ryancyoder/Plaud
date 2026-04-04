@@ -389,7 +389,7 @@ export default function Dashboard() {
             </svg>
           </button>
           <ImportButton onImport={handleImport} />
-          <BatchPhotoImport transcripts={transcripts} onPhotosMatched={handleBatchPhotos} pendingCount={pendingPhotoCount} />
+          <BatchPhotoImport transcripts={transcripts} clients={clients} onPhotosMatched={handleBatchPhotos} pendingCount={pendingPhotoCount} />
           {transcripts.length > 0 && (
             <button
               onClick={handleClearData}

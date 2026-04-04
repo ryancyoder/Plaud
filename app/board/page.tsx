@@ -580,6 +580,8 @@ function EventIcon({ type, size = 14 }: { type: ClientEventType; size?: number }
       return <svg {...props}><path d="M17 3a2.85 2.85 0 114 4L7.5 20.5 2 22l1.5-5.5Z" /></svg>;
     case "recording":
       return <svg {...props}><path d="M12 2a3 3 0 00-3 3v7a3 3 0 006 0V5a3 3 0 00-3-3Z" /><path d="M19 10v2a7 7 0 01-14 0v-2" /><line x1="12" y1="19" x2="12" y2="22" /></svg>;
+    case "photo":
+      return <svg {...props}><rect x="2" y="4" width="20" height="16" rx="2" /><circle cx="12" cy="13" r="3" /><path d="M8.5 4V2M15.5 4V2" /></svg>;
     default:
       return <svg {...props}><circle cx="12" cy="12" r="4" /></svg>;
   }
@@ -654,6 +656,7 @@ function ClientTimeline({ client, transcripts }: { client: Client; transcripts: 
     "payment": "text-emerald-600 bg-emerald-50 border-emerald-200",
     "note": "text-gray-600 bg-gray-50 border-gray-200",
     "recording": "text-rose-600 bg-rose-50 border-rose-200",
+    "photo": "text-pink-600 bg-pink-50 border-pink-200",
   };
 
   return (
@@ -677,7 +680,7 @@ function ClientTimeline({ client, transcripts }: { client: Client; transcripts: 
               onChange={(e) => setNewType(e.target.value as ClientEventType)}
               className="flex-1 px-2 py-1.5 border border-border rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-accent"
             >
-              {CLIENT_EVENT_TYPES.filter((t) => t.key !== "status-change").map((t) => (
+              {CLIENT_EVENT_TYPES.filter((t) => t.key !== "status-change" && t.key !== "recording" && t.key !== "photo").map((t) => (
                 <option key={t.key} value={t.key}>{t.label}</option>
               ))}
             </select>
@@ -718,6 +721,7 @@ function ClientTimeline({ client, transcripts }: { client: Client; transcripts: 
           <div className="flex gap-0 overflow-x-auto pb-2" style={{ minHeight: 70 }}>
             {allEvents.map((ev) => {
               const isRecording = ev.type === "recording";
+              const isPhoto = ev.type === "photo" && ev.photoUrl;
               const colors = eventTypeColors[ev.type] || "text-gray-500 bg-gray-50 border-gray-200";
               const colorParts = colors.split(" ");
               return (
@@ -726,10 +730,24 @@ function ClientTimeline({ client, transcripts }: { client: Client; transcripts: 
                   className="flex flex-col items-center shrink-0 group relative"
                   style={{ minWidth: 52 }}
                 >
-                  {/* Dot/icon */}
-                  <div className={`w-[30px] h-[30px] rounded-full border-2 flex items-center justify-center z-10 ${colorParts.slice(0, 3).join(" ")}`}>
-                    <EventIcon type={ev.type} size={13} />
-                  </div>
+                  {/* Dot/icon — photo events show thumbnail */}
+                  {isPhoto ? (
+                    <div className="w-[30px] h-[30px] rounded-full border-2 border-pink-200 overflow-hidden z-10">
+                      <img src={ev.photoUrl} alt={ev.label} className="w-full h-full object-cover" />
+                    </div>
+                  ) : (
+                    <div className={`w-[30px] h-[30px] rounded-full border-2 flex items-center justify-center z-10 ${colorParts.slice(0, 3).join(" ")}`}>
+                      <EventIcon type={ev.type} size={13} />
+                    </div>
+                  )}
+                  {/* Photo hover preview */}
+                  {isPhoto && (
+                    <div className="absolute bottom-full mb-1 hidden group-hover:block z-30">
+                      <div className="w-32 h-32 rounded-lg border-2 border-pink-200 overflow-hidden shadow-lg">
+                        <img src={ev.photoUrl} alt={ev.label} className="w-full h-full object-cover" />
+                      </div>
+                    </div>
+                  )}
                   {/* Date */}
                   <div className="text-[9px] text-muted mt-1 tabular-nums whitespace-nowrap">{formatDate(ev.date)}</div>
                   {/* Label */}

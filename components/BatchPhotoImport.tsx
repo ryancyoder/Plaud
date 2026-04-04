@@ -1,17 +1,20 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { Transcript, Attachment } from "@/lib/types";
+import { Transcript, Attachment, Client } from "@/lib/types";
 import { batchMatchPhotos, PhotoMatchResult, UnmatchedPhoto } from "@/lib/photo-matcher";
 import { savePendingPhotos, PendingPhoto } from "@/lib/attachment-store";
+import { addEvent } from "@/lib/events";
 
 interface BatchPhotoImportProps {
   transcripts: Transcript[];
+  clients: Client[];
   onPhotosMatched: (results: PhotoMatchResult[]) => void;
   pendingCount?: number;
 }
 
-export default function BatchPhotoImport({ transcripts, onPhotosMatched, pendingCount = 0 }: BatchPhotoImportProps) {
+export default function BatchPhotoImport({ transcripts, clients, onPhotosMatched, pendingCount = 0 }: BatchPhotoImportProps) {
+  const [assigningIndex, setAssigningIndex] = useState<number | null>(null);
   const [processing, setProcessing] = useState(false);
   const [results, setResults] = useState<{
     matched: PhotoMatchResult[];
@@ -145,22 +148,64 @@ export default function BatchPhotoImport({ transcripts, onPhotosMatched, pending
               {/* Unmatched photos */}
               {results.unmatched.length > 0 && (
                 <div>
-                  <h3 className="text-[10px] font-semibold uppercase text-muted mb-1">Pending — Waiting for Matching Recordings</h3>
-                  <p className="text-[10px] text-gray-400 mb-2">These will auto-match when recordings are imported</p>
+                  <h3 className="text-[10px] font-semibold uppercase text-muted mb-1">Unmatched Photos</h3>
+                  <p className="text-[10px] text-gray-400 mb-2">Assign to a client or wait for matching recordings</p>
                   <div className="space-y-1.5">
                     {results.unmatched.map((u, i) => (
-                      <div key={i} className="flex items-center gap-2 p-2 rounded-lg bg-amber-50 border border-amber-200">
-                        <div className="shrink-0 w-10 h-10 rounded overflow-hidden border border-amber-300">
-                          <img src={u.attachment.dataUrl} alt={u.attachment.name} className="w-full h-full object-cover" />
+                      <div key={i} className="p-2 rounded-lg bg-amber-50 border border-amber-200">
+                        <div className="flex items-center gap-2">
+                          <div className="shrink-0 w-10 h-10 rounded overflow-hidden border border-amber-300">
+                            <img src={u.attachment.dataUrl} alt={u.attachment.name} className="w-full h-full object-cover" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-medium truncate">{u.attachment.name}</p>
+                            <p className="text-[10px] text-amber-700">
+                              {u.timestamp.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
+                              {" — "}
+                              {u.reason}
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => setAssigningIndex(assigningIndex === i ? null : i)}
+                            className={`shrink-0 px-2 py-1 rounded text-[10px] font-medium ${
+                              assigningIndex === i
+                                ? "bg-accent text-white"
+                                : "bg-white border border-border text-muted hover:text-foreground"
+                            }`}
+                          >
+                            Assign
+                          </button>
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs font-medium truncate">{u.attachment.name}</p>
-                          <p className="text-[10px] text-amber-700">
-                            {u.timestamp.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
-                            {" — "}
-                            {u.reason}
-                          </p>
-                        </div>
+                        {assigningIndex === i && clients.length > 0 && (
+                          <div className="mt-2 max-h-32 overflow-y-auto border border-border rounded-lg bg-white">
+                            {clients.map((c) => (
+                              <button
+                                key={c.id}
+                                onClick={() => {
+                                  addEvent(
+                                    c.id,
+                                    "photo",
+                                    u.timestamp.toISOString(),
+                                    u.attachment.name,
+                                    false,
+                                    u.attachment.dataUrl
+                                  );
+                                  // Remove from unmatched list
+                                  setResults((prev) =>
+                                    prev ? { ...prev, unmatched: prev.unmatched.filter((_, j) => j !== i) } : prev
+                                  );
+                                  setAssigningIndex(null);
+                                }}
+                                className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-50 border-b border-gray-100 last:border-b-0"
+                              >
+                                {c.name}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                        {assigningIndex === i && clients.length === 0 && (
+                          <p className="mt-2 text-[10px] text-gray-400 text-center py-2">No clients yet — import one first</p>
+                        )}
                       </div>
                     ))}
                   </div>
