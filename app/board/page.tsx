@@ -1,18 +1,16 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { Client, ClientStatus, CLIENT_STATUSES, Transcript, ClientEvent, ClientEventType, CLIENT_EVENT_TYPES } from "@/lib/types";
+import { Client, ClientStatus, CLIENT_STATUSES, AppEvent, EventType, EVENT_TYPES } from "@/lib/types";
 import { loadClients, saveClients, updateClientStatus, deleteClient, updateClient } from "@/lib/clients";
-import { loadTranscripts } from "@/lib/store";
-import { getTranscriptsForClient } from "@/lib/clients";
+import { loadEvents, getEventsForClient, addEvent, deleteEvent, deleteEventsForClient } from "@/lib/event-store";
 import { parseRfpClipboard, rfpToClientData } from "@/lib/rfp-parser";
 import { formatDuration, getLastName } from "@/lib/utils";
-import { getEventsForClient, addEvent, deleteEvent, deleteEventsForClient } from "@/lib/events";
 import Link from "next/link";
 
 export default function BoardPage() {
   const [clients, setClients] = useState<Client[]>([]);
-  const [transcripts, setTranscripts] = useState<Transcript[]>([]);
+  const [events, setEvents] = useState<AppEvent[]>([]);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [mounted, setMounted] = useState(false);
   const [importToast, setImportToast] = useState<string | null>(null);
@@ -30,7 +28,7 @@ export default function BoardPage() {
 
   useEffect(() => {
     setClients(loadClients());
-    setTranscripts(loadTranscripts());
+    setEvents(loadEvents());
     setMounted(true);
   }, []);
 
@@ -47,7 +45,9 @@ export default function BoardPage() {
     if (oldStatus === newStatus) { setDraggedClient(null); setDragOverColumn(null); return; }
     updateClientStatus(clientId, newStatus);
     const statusLabel = CLIENT_STATUSES.find((s) => s.key === newStatus)?.label || newStatus;
-    addEvent(clientId, "status-change", new Date().toISOString(), `Status changed to ${statusLabel}`, true);
+    const now = new Date();
+    const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    addEvent({ type: "status-change", clientId, date: dateStr, label: `Status changed to ${statusLabel}`, auto: true });
     setClients((prev) => prev.map((c) => c.id === clientId ? { ...c, status: newStatus } : c));
     setSelectedClient((prev) => prev?.id === clientId ? { ...prev, status: newStatus } : prev);
     setDraggedClient(null);
@@ -129,8 +129,8 @@ export default function BoardPage() {
     }
   }, []);
 
-  const clientTranscripts = selectedClient
-    ? getTranscriptsForClient(transcripts, selectedClient)
+  const clientEvents = selectedClient
+    ? events.filter((e) => e.clientId === selectedClient.id)
     : [];
 
   if (!mounted) return null;
@@ -221,7 +221,7 @@ export default function BoardPage() {
                   {colClients.map((client) => {
                     const isSelected = selectedClient?.id === client.id;
                     const isDragging = draggedClient?.id === client.id;
-                    const tCount = getTranscriptsForClient(transcripts, client).length;
+                    const tCount = events.filter((e) => e.clientId === client.id).length;
                     return (
                       <div
                         key={client.id}
@@ -282,7 +282,7 @@ export default function BoardPage() {
         {selectedClient ? (
           <ClientViewer
             client={selectedClient}
-            transcripts={clientTranscripts}
+            events={clientEvents}
             onDelete={(id) => {
               deleteClient(id);
               deleteEventsForClient(id);
@@ -315,13 +315,14 @@ export default function BoardPage() {
 
 // --- Client Viewer ---
 
-function ClientViewer({ client, transcripts, onDelete, onUpdate }: {
+function ClientViewer({ client, events, onDelete, onUpdate }: {
   client: Client;
-  transcripts: Transcript[];
+  events: AppEvent[];
   onDelete: (id: string) => void;
   onUpdate: (id: string, updates: Partial<Client>) => void;
 }) {
-  const sorted = [...transcripts].sort((a, b) => b.date.localeCompare(a.date) || b.startTime.localeCompare(a.startTime));
+  const recordings = events.filter((e) => e.type === "recording");
+  const sorted = [...recordings].sort((a, b) => b.date.localeCompare(a.date) || (b.startTime || "").localeCompare(a.startTime || ""));
   const statusInfo = CLIENT_STATUSES.find((s) => s.key === (client.status || "lead"));
 
   const [editing, setEditing] = useState(false);
@@ -513,12 +514,12 @@ function ClientViewer({ client, transcripts, onDelete, onUpdate }: {
 
       {/* Timeline + Recordings */}
       <div className="flex-1 overflow-y-auto flex flex-col">
-        <ClientTimeline client={client} transcripts={transcripts} />
+        <ClientTimeline client={client} events={events} />
 
         {/* Recordings */}
         <div className="border-t border-border">
           <div className="px-4 py-2 border-b border-border bg-gray-50/50">
-            <h3 className="text-[10px] font-bold uppercase text-muted">Recordings ({transcripts.length})</h3>
+            <h3 className="text-[10px] font-bold uppercase text-muted">Recordings ({sorted.length})</h3>
           </div>
           {sorted.length === 0 ? (
             <div className="flex items-center justify-center h-20 text-xs text-gray-300">
@@ -526,21 +527,21 @@ function ClientViewer({ client, transcripts, onDelete, onUpdate }: {
             </div>
           ) : (
             <div className="divide-y divide-gray-100">
-              {sorted.map((t) => (
-                <div key={t.id} className="px-4 py-2.5 hover:bg-gray-50">
+              {sorted.map((ev) => (
+                <div key={ev.id} className="px-4 py-2.5 hover:bg-gray-50">
                   <div className="flex items-center gap-3">
                     <div className="shrink-0 w-14">
-                      <div className="text-[10px] text-muted">{t.date}</div>
-                      <div className="text-xs font-semibold tabular-nums">{t.startTime}</div>
+                      <div className="text-[10px] text-muted">{ev.date}</div>
+                      <div className="text-xs font-semibold tabular-nums">{ev.startTime}</div>
                     </div>
                     <div className="flex-1 min-w-0">
-                      <h4 className="text-xs font-medium truncate">{t.title}</h4>
+                      <h4 className="text-xs font-medium truncate">{ev.label}</h4>
                       <p className="text-[10px] text-muted truncate mt-0.5">
-                        {t.summary.length > 120 ? t.summary.slice(0, 120) + "..." : t.summary}
+                        {(ev.summary || "").length > 120 ? (ev.summary || "").slice(0, 120) + "..." : ev.summary || ""}
                       </p>
                     </div>
                     <div className="shrink-0 text-[10px] text-muted">
-                      {formatDuration(t.duration)}
+                      {formatDuration(ev.duration || 0)}
                     </div>
                   </div>
                 </div>
@@ -555,7 +556,7 @@ function ClientViewer({ client, transcripts, onDelete, onUpdate }: {
 
 // --- Event Icon ---
 
-function EventIcon({ type, size = 14 }: { type: ClientEventType; size?: number }) {
+function EventIcon({ type, size = 14 }: { type: EventType; size?: number }) {
   const s = String(size);
   const props = { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
 
@@ -591,10 +592,10 @@ function EventIcon({ type, size = 14 }: { type: ClientEventType; size?: number }
 
 // --- Client Timeline ---
 
-function ClientTimeline({ client, transcripts }: { client: Client; transcripts: Transcript[] }) {
-  const [events, setEvents] = useState<ClientEvent[]>([]);
+function ClientTimeline({ client, events: clientEvents }: { client: Client; events: AppEvent[] }) {
+  const [localEvents, setLocalEvents] = useState<AppEvent[]>([]);
   const [showAdd, setShowAdd] = useState(false);
-  const [newType, setNewType] = useState<ClientEventType>("phone-call");
+  const [newType, setNewType] = useState<EventType>("phone-call");
   const [newDate, setNewDate] = useState(new Date().toISOString().slice(0, 10));
   const [newLabel, setNewLabel] = useState("");
 
@@ -606,29 +607,25 @@ function ClientTimeline({ client, transcripts }: { client: Client; transcripts: 
     const stored = getEventsForClient(client.id);
     // Auto-seed site-visit from appointmentDate if not already present
     if (client.appointmentDate && !stored.some((e) => e.type === "site-visit" && e.auto)) {
-      addEvent(client.id, "site-visit", client.appointmentDate, "Site Visit", true);
-      setEvents(getEventsForClient(client.id));
+      const apptDate = client.appointmentDate.includes("T") ? client.appointmentDate.split("T")[0] : client.appointmentDate;
+      addEvent({ type: "site-visit", clientId: client.id, date: apptDate, label: "Site Visit", auto: true });
+      setLocalEvents(getEventsForClient(client.id));
     } else {
-      setEvents(stored);
+      setLocalEvents(stored);
     }
   }
 
-  // Merge stored events with recording events from transcripts
+  // Use clientEvents passed from parent (already filtered) merged with any local-only events
   const allEvents = useMemo(() => {
-    const recordingEvents: ClientEvent[] = transcripts.map((t) => ({
-      id: `rec-${t.id}`,
-      clientId: client.id,
-      type: "recording" as ClientEventType,
-      date: new Date(`${t.date}T${t.startTime}:00`).toISOString(),
-      label: t.title,
-      auto: true,
-    }));
-    return [...events, ...recordingEvents].sort((a, b) => a.date.localeCompare(b.date));
-  }, [events, transcripts, client.id]);
+    // Dedupe: prefer clientEvents, add any localEvents not already present
+    const ids = new Set(clientEvents.map((e) => e.id));
+    const extra = localEvents.filter((e) => !ids.has(e.id));
+    return [...clientEvents, ...extra].sort((a, b) => a.date.localeCompare(b.date));
+  }, [localEvents, clientEvents]);
 
   function handleAdd() {
     if (!newLabel.trim()) return;
-    addEvent(client.id, newType, new Date(newDate).toISOString(), newLabel.trim());
+    addEvent({ type: newType, clientId: client.id, date: newDate, label: newLabel.trim() });
     setNewLabel("");
     setShowAdd(false);
     refreshEvents();
@@ -646,7 +643,7 @@ function ClientTimeline({ client, transcripts }: { client: Client; transcripts: 
     } catch { return iso; }
   };
 
-  const eventTypeColors: Record<ClientEventType, string> = {
+  const eventTypeColors: Record<EventType, string> = {
     "site-visit": "text-green-600 bg-green-50 border-green-200",
     "phone-call": "text-blue-600 bg-blue-50 border-blue-200",
     "text-message": "text-indigo-600 bg-indigo-50 border-indigo-200",
@@ -679,10 +676,10 @@ function ClientTimeline({ client, transcripts }: { client: Client; transcripts: 
           <div className="flex gap-2">
             <select
               value={newType}
-              onChange={(e) => setNewType(e.target.value as ClientEventType)}
+              onChange={(e) => setNewType(e.target.value as EventType)}
               className="flex-1 px-2 py-1.5 border border-border rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-accent"
             >
-              {CLIENT_EVENT_TYPES.filter((t) => t.key !== "status-change" && t.key !== "recording" && t.key !== "photo").map((t) => (
+              {EVENT_TYPES.filter((t) => t.key !== "status-change" && t.key !== "recording" && t.key !== "photo").map((t) => (
                 <option key={t.key} value={t.key}>{t.label}</option>
               ))}
             </select>
@@ -723,7 +720,7 @@ function ClientTimeline({ client, transcripts }: { client: Client; transcripts: 
           <div className="flex gap-0 overflow-x-auto pb-2" style={{ minHeight: 70 }}>
             {allEvents.map((ev) => {
               const isRecording = ev.type === "recording";
-              const isPhoto = ev.type === "photo" && ev.photoUrl;
+              const photoUrl = ev.type === "photo" && ev.attachments?.[0]?.dataUrl;
               const colors = eventTypeColors[ev.type] || "text-gray-500 bg-gray-50 border-gray-200";
               const colorParts = colors.split(" ");
               return (
@@ -733,9 +730,9 @@ function ClientTimeline({ client, transcripts }: { client: Client; transcripts: 
                   style={{ minWidth: 52 }}
                 >
                   {/* Dot/icon — photo events show thumbnail */}
-                  {isPhoto ? (
+                  {photoUrl ? (
                     <div className="w-[30px] h-[30px] rounded-full border-2 border-pink-200 overflow-hidden z-10">
-                      <img src={ev.photoUrl} alt={ev.label} className="w-full h-full object-cover" />
+                      <img src={photoUrl} alt={ev.label} className="w-full h-full object-cover" />
                     </div>
                   ) : (
                     <div className={`w-[30px] h-[30px] rounded-full border-2 flex items-center justify-center z-10 ${colorParts.slice(0, 3).join(" ")}`}>
@@ -743,10 +740,10 @@ function ClientTimeline({ client, transcripts }: { client: Client; transcripts: 
                     </div>
                   )}
                   {/* Photo hover preview */}
-                  {isPhoto && (
+                  {photoUrl && (
                     <div className="absolute bottom-full mb-1 hidden group-hover:block z-30">
                       <div className="w-32 h-32 rounded-lg border-2 border-pink-200 overflow-hidden shadow-lg">
-                        <img src={ev.photoUrl} alt={ev.label} className="w-full h-full object-cover" />
+                        <img src={photoUrl} alt={ev.label} className="w-full h-full object-cover" />
                       </div>
                     </div>
                   )}

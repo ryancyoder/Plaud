@@ -200,6 +200,5 @@ export function rfpToClientData(rfp: ParsedRfp): Omit<Client, "id"> {
     address: rfp.address,
     notes: rfp.notes || undefined,
     appointmentDate: rfp.appointmentDate,
-    transcriptCount: 0,
   };
 }

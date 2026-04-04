@@ -341,6 +341,7 @@ function PromptsTab() {
 // --- Data Tab ---
 
 const BACKUP_KEYS = [
+  "plaud-events",
   "plaud-transcripts",
   "plaud-lists",
   "plaud-clients",
