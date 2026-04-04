@@ -237,15 +237,10 @@ export default function BoardPage() {
                         }`}
                       >
                         <div className="flex items-center gap-1.5">
-                          <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold shrink-0 ${
-                            client.type === "client" ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-600"
-                          }`}>
-                            {client.name.charAt(0).toUpperCase()}
-                          </div>
                           <span className="text-[11px] font-medium truncate">{getLastName(client.name)}</span>
                         </div>
                         {(client.company || tCount > 0) && (
-                          <div className="flex items-center gap-2 mt-1 pl-6.5">
+                          <div className="flex items-center gap-2 mt-1">
                             {client.company && (
                               <span className="text-[9px] text-muted truncate">{client.company}</span>
                             )}
@@ -362,11 +357,6 @@ function ClientViewer({ client, transcripts, onDelete, onUpdate }: {
       {/* Client info sidebar */}
       <div className="w-64 shrink-0 border-r border-border p-4 overflow-y-auto">
         <div className="flex items-center gap-3 mb-4">
-          <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${
-            client.type === "client" ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-600"
-          }`}>
-            {client.name.charAt(0).toUpperCase()}
-          </div>
           <div className="flex-1 min-w-0">
             <h2 className="text-sm font-bold">{client.name}</h2>
             {client.company && <p className="text-[10px] text-muted">{client.company}</p>}
