@@ -339,6 +339,29 @@ export default function Dashboard() {
     }
   }, [selectedEvent]);
 
+  const handleSelectClient = useCallback((client: Client | null) => {
+    setSelectedClient(client);
+    if (!client) return;
+    // Find the most recent event for this client and navigate to its date
+    const clientEvents = events
+      .filter(
+        (ev) =>
+          ev.clientId === client.id ||
+          ev.mentions?.some((m) => m.toLowerCase() === client.name.toLowerCase())
+      )
+      .sort((a, b) => b.date.localeCompare(a.date));
+    if (clientEvents.length === 0) return;
+    const targetDate = clientEvents[0].date;
+    setSelectedDate(targetDate);
+    // Calculate week offset so the target date's week is shown
+    const targetMs = new Date(targetDate + "T00:00:00").getTime();
+    const now = new Date();
+    const day = now.getDay();
+    const mondayMs = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (day === 0 ? 6 : day - 1)).getTime();
+    const diffWeeks = Math.floor((targetMs - mondayMs) / (7 * 24 * 60 * 60 * 1000));
+    setWeekOffset(diffWeeks);
+  }, [events]);
+
   const getRecordingsForDate = useCallback(
     (date: string) => visibleEvents.filter((ev) => ev.date === date),
     [visibleEvents]
@@ -470,7 +493,7 @@ export default function Dashboard() {
               <ClientRoster
                 clients={clients}
                 selectedClientId={selectedClient?.id || null}
-                onSelectClient={setSelectedClient}
+                onSelectClient={handleSelectClient}
                 onClientsChange={handleClientsChange}
                 transcriptCountByClient={eventCountByClient}
               />
