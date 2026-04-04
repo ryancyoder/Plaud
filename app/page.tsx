@@ -105,6 +105,20 @@ export default function Dashboard() {
     }
   }, [clients, selectedClient]);
 
+  // Pick up event navigation from Actions page
+  useEffect(() => {
+    const eventId = sessionStorage.getItem("plaud-navigate-event");
+    const eventDate = sessionStorage.getItem("plaud-navigate-date");
+    if (eventId) {
+      sessionStorage.removeItem("plaud-navigate-event");
+      sessionStorage.removeItem("plaud-navigate-date");
+      setSelectedEventId(eventId);
+      if (eventDate) {
+        setSelectedDate(eventDate);
+      }
+    }
+  }, []);
+
   const currentWeek = getWeekDates(weekOffset);
 
   // Keep week header in sync with selected date
