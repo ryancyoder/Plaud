@@ -683,6 +683,31 @@ function DocumentList({
     setFullscreenDoc(doc);
   }, [getBlobUrl]);
 
+  // Open PDF in new tab — iOS Safari shows native PDF viewer with Markup
+  const handleOpenNative = useCallback((doc: Attachment) => {
+    const url = getBlobUrl(doc);
+    if (url) window.open(url, "_blank");
+  }, [getBlobUrl]);
+
+  // Share PDF via iOS share sheet (gives access to Markup, Files, etc.)
+  const handleShare = useCallback(async (doc: Attachment) => {
+    try {
+      const url = getBlobUrl(doc);
+      if (!url) return;
+      const resp = await fetch(url);
+      const blob = await resp.blob();
+      const file = new File([blob], doc.name, { type: doc.mimeType });
+      if (navigator.share && navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ files: [file], title: doc.name });
+      } else {
+        // Fallback: open in new tab
+        window.open(url, "_blank");
+      }
+    } catch {
+      // User cancelled share or not supported — ignore
+    }
+  }, [getBlobUrl]);
+
   return (
     <div className="p-3">
       <div className="flex items-center justify-between mb-3">
@@ -722,15 +747,24 @@ function DocumentList({
                 {/* Actions */}
                 <div className="flex items-center gap-1.5 shrink-0">
                   {isPdf(doc.mimeType) && (
-                    <button
-                      onClick={() => handleFullscreen(doc)}
-                      className="text-[10px] px-2 py-1 rounded border border-accent text-accent hover:bg-accent-light active:scale-95 font-medium"
-                      title="Full screen"
-                    >
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
-                      </svg>
-                    </button>
+                    <>
+                      <button
+                        onClick={() => handleShare(doc)}
+                        className="text-[10px] px-2 py-1 rounded border border-purple-300 text-purple-600 hover:bg-purple-50 active:scale-95 font-medium"
+                        title="Share / Markup"
+                      >
+                        Markup
+                      </button>
+                      <button
+                        onClick={() => handleFullscreen(doc)}
+                        className="text-[10px] px-2 py-1 rounded border border-accent text-accent hover:bg-accent-light active:scale-95 font-medium"
+                        title="Full screen preview"
+                      >
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
+                        </svg>
+                      </button>
+                    </>
                   )}
                   <a
                     href={doc.dataUrl || blobUrls[doc.id] || "#"}
