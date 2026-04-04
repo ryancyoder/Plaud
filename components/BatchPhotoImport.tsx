@@ -1,13 +1,13 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
-import { Transcript, Attachment, Client } from "@/lib/types";
+import { useState, useRef } from "react";
+import { AppEvent, Attachment, Client } from "@/lib/types";
 import { batchMatchPhotos, PhotoMatchResult, UnmatchedPhoto } from "@/lib/photo-matcher";
 import { savePendingPhotos, loadPendingPhotos, removePendingPhotos, PendingPhoto } from "@/lib/attachment-store";
-import { addEvent } from "@/lib/events";
+import { addEvent } from "@/lib/event-store";
 
 interface BatchPhotoImportProps {
-  transcripts: Transcript[];
+  events: AppEvent[];
   clients: Client[];
   onPhotosMatched: (results: PhotoMatchResult[]) => void;
   pendingCount?: number;
@@ -15,7 +15,7 @@ interface BatchPhotoImportProps {
 }
 
 export default function BatchPhotoImport({
-  transcripts,
+  events,
   clients,
   onPhotosMatched,
   pendingCount = 0,
@@ -39,7 +39,7 @@ export default function BatchPhotoImport({
     setProcessing(true);
 
     try {
-      const result = await batchMatchPhotos(files, transcripts);
+      const result = await batchMatchPhotos(files, events);
       setResults(result);
 
       if (result.matched.length > 0) {
@@ -69,18 +69,39 @@ export default function BatchPhotoImport({
   }
 
   async function assignPendingPhoto(photo: PendingPhoto, client: Client) {
-    addEvent(
-      client.id,
-      "photo",
-      photo.timestamp,
-      photo.name,
-      false,
-      photo.dataUrl
-    );
+    const photoDate = new Date(photo.timestamp);
+    const dateStr = `${photoDate.getFullYear()}-${String(photoDate.getMonth() + 1).padStart(2, "0")}-${String(photoDate.getDate()).padStart(2, "0")}`;
+    const att: Attachment = {
+      id: photo.id,
+      name: photo.name,
+      type: "photo",
+      mimeType: photo.mimeType,
+      dataUrl: photo.dataUrl,
+      timestamp: photo.timestamp,
+    };
+    addEvent({
+      type: "photo",
+      clientId: client.id,
+      date: dateStr,
+      label: photo.name,
+      attachments: [att],
+    });
     await removePendingPhotos([photo.id]);
     setPendingPhotos((prev) => prev.filter((p) => p.id !== photo.id));
     setPendingAssigning(null);
     onPendingCountChange?.(Math.max(0, (pendingCount || 0) - 1));
+  }
+
+  function assignUnmatchedPhoto(u: UnmatchedPhoto, client: Client) {
+    const photoDate = u.timestamp;
+    const dateStr = `${photoDate.getFullYear()}-${String(photoDate.getMonth() + 1).padStart(2, "0")}-${String(photoDate.getDate()).padStart(2, "0")}`;
+    addEvent({
+      type: "photo",
+      clientId: client.id,
+      date: dateStr,
+      label: u.attachment.name,
+      attachments: [u.attachment],
+    });
   }
 
   return (
@@ -163,9 +184,9 @@ export default function BatchPhotoImport({
                   <h3 className="text-[10px] font-semibold uppercase text-muted mb-2">Assigned to Recordings</h3>
                   <div className="space-y-2">
                     {results.matched.map((r) => (
-                      <div key={r.transcriptId} className="rounded-lg border border-border p-2.5">
+                      <div key={r.eventId} className="rounded-lg border border-border p-2.5">
                         <div className="flex items-center justify-between mb-1.5">
-                          <span className="text-xs font-semibold">{r.transcriptTitle}</span>
+                          <span className="text-xs font-semibold">{r.eventTitle}</span>
                           <span className="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full">
                             {r.attachments.length} photo{r.attachments.length !== 1 ? "s" : ""}
                           </span>
@@ -219,14 +240,7 @@ export default function BatchPhotoImport({
                               <button
                                 key={c.id}
                                 onClick={() => {
-                                  addEvent(
-                                    c.id,
-                                    "photo",
-                                    u.timestamp.toISOString(),
-                                    u.attachment.name,
-                                    false,
-                                    u.attachment.dataUrl
-                                  );
+                                  assignUnmatchedPhoto(u, c);
                                   setResults((prev) =>
                                     prev ? { ...prev, unmatched: prev.unmatched.filter((_, j) => j !== i) } : prev
                                   );

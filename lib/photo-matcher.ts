@@ -1,6 +1,6 @@
 "use client";
 
-import { Transcript, Attachment } from "./types";
+import { AppEvent, Attachment } from "./types";
 import { resizeImage } from "./attachment-store";
 
 /**
@@ -65,6 +65,7 @@ async function readExifDate(file: File): Promise<Date | null> {
         if (dateStr2) return parseExifDateString(dateStr2);
       }
 
+      void length;
       return null;
     } else if ((marker & 0xff00) === 0xff00) {
       // Other marker — skip
@@ -141,41 +142,38 @@ function parseExifDateString(s: string): Date | null {
 }
 
 /**
- * Match a photo's timestamp to the transcript whose recording window it falls within.
- * A photo matches a transcript if it was taken between startTime and startTime + duration,
- * with a configurable buffer (default 15 min before/after).
+ * Match a photo's timestamp to the recording event whose window it falls within.
  */
-export function matchPhotoToTranscript(
+export function matchPhotoToEvent(
   photoDate: Date,
-  transcripts: Transcript[],
+  events: AppEvent[],
   bufferMinutes = 15,
-): Transcript | null {
+): AppEvent | null {
   const photoTime = photoDate.getTime();
   const photoDateStr = `${photoDate.getFullYear()}-${String(photoDate.getMonth() + 1).padStart(2, "0")}-${String(photoDate.getDate()).padStart(2, "0")}`;
 
-  // Only consider transcripts from the same day
-  const sameDayTranscripts = transcripts.filter((t) => t.date === photoDateStr);
-  if (sameDayTranscripts.length === 0) return null;
+  // Only consider recording events from the same day
+  const sameDayEvents = events.filter((e) => e.date === photoDateStr && e.type === "recording");
+  if (sameDayEvents.length === 0) return null;
 
-  let bestMatch: Transcript | null = null;
+  let bestMatch: AppEvent | null = null;
   let bestDistance = Infinity;
 
-  for (const t of sameDayTranscripts) {
-    const [h, m] = t.startTime.split(":").map(Number);
+  for (const ev of sameDayEvents) {
+    const [h, m] = (ev.startTime || "00:00").split(":").map(Number);
     if (isNaN(h) || isNaN(m)) continue;
 
     const startDate = new Date(photoDate);
     startDate.setHours(h, m, 0, 0);
     const startMs = startDate.getTime() - bufferMinutes * 60 * 1000;
-    const endMs = startDate.getTime() + t.duration * 60 * 1000 + bufferMinutes * 60 * 1000;
+    const endMs = startDate.getTime() + (ev.duration || 0) * 60 * 1000 + bufferMinutes * 60 * 1000;
 
     if (photoTime >= startMs && photoTime <= endMs) {
-      // Within window — pick closest to center of recording
-      const center = startDate.getTime() + (t.duration * 60 * 1000) / 2;
+      const center = startDate.getTime() + ((ev.duration || 0) * 60 * 1000) / 2;
       const dist = Math.abs(photoTime - center);
       if (dist < bestDistance) {
         bestDistance = dist;
-        bestMatch = t;
+        bestMatch = ev;
       }
     }
   }
@@ -184,8 +182,8 @@ export function matchPhotoToTranscript(
 }
 
 export interface PhotoMatchResult {
-  transcriptId: string;
-  transcriptTitle: string;
+  eventId: string;
+  eventTitle: string;
   attachments: Attachment[];
 }
 
@@ -196,11 +194,11 @@ export interface UnmatchedPhoto {
 }
 
 /**
- * Process a batch of photo files: extract timestamps, resize, match to transcripts.
+ * Process a batch of photo files: extract timestamps, resize, match to recording events.
  */
 export async function batchMatchPhotos(
   files: FileList,
-  transcripts: Transcript[],
+  events: AppEvent[],
 ): Promise<{ matched: PhotoMatchResult[]; unmatched: UnmatchedPhoto[] }> {
   const matched: Map<string, PhotoMatchResult> = new Map();
   const unmatched: UnmatchedPhoto[] = [];
@@ -221,21 +219,21 @@ export async function batchMatchPhotos(
       timestamp: timestamp.toISOString(),
     };
 
-    const match = matchPhotoToTranscript(timestamp, transcripts);
+    const match = matchPhotoToEvent(timestamp, events);
     if (match) {
       const existing = matched.get(match.id);
       if (existing) {
         existing.attachments.push(attachment);
       } else {
         matched.set(match.id, {
-          transcriptId: match.id,
-          transcriptTitle: match.title,
+          eventId: match.id,
+          eventTitle: match.label,
           attachments: [attachment],
         });
       }
     } else {
       const dateStr = `${timestamp.getFullYear()}-${String(timestamp.getMonth() + 1).padStart(2, "0")}-${String(timestamp.getDate()).padStart(2, "0")}`;
-      const hasSameDay = transcripts.some((t) => t.date === dateStr);
+      const hasSameDay = events.some((e) => e.date === dateStr);
       unmatched.push({
         attachment,
         timestamp,
