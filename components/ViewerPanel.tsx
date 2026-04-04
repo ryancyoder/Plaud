@@ -145,6 +145,9 @@ export default function ViewerPanel({
             photos={aggregateEvents.flatMap((ev) =>
               (ev.attachments || []).filter((a) => a.mimeType.startsWith("image/") && a.dataUrl)
             )}
+            documents={aggregateEvents.flatMap((ev) =>
+              (ev.attachments || []).filter((a) => a.mimeType === "application/pdf" && a.dataUrl)
+            )}
           />
         )}
       </div>
@@ -818,17 +821,21 @@ function DocumentList({
 
 // --- Scratchpad Tab ---
 
-function ScratchpadTab({ client, photos }: { client: Client; photos: Attachment[] }) {
+function ScratchpadTab({ client, photos, documents }: { client: Client; photos: Attachment[]; documents: Attachment[] }) {
   const [scratchpad, setScratchpad] = useState<ScratchpadData | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [backgroundSrc, setBackgroundSrc] = useState<string | null>(null);
   const [showBgPicker, setShowBgPicker] = useState(false);
+  const [bgPickerTab, setBgPickerTab] = useState<"photos" | "pdfs">("photos");
+  const [pdfPages, setPdfPages] = useState<{ docName: string; pages: string[] }[]>([]);
+  const [renderingPdf, setRenderingPdf] = useState(false);
   const saveTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Load scratchpad from IndexedDB when client changes
   useEffect(() => {
     setLoaded(false);
     setShowBgPicker(false);
+    setPdfPages([]);
     loadScratchpad(client.id).then((data) => {
       setScratchpad(data);
       setBackgroundSrc(data?.backgroundDataUrl || null);
@@ -870,6 +877,53 @@ function ScratchpadTab({ client, photos }: { client: Client; photos: Attachment[
     setScratchpad(data);
   }, [client.id]);
 
+  // Render PDF pages as images for the background picker
+  const handleRenderPdf = useCallback(async (doc: Attachment) => {
+    setRenderingPdf(true);
+    try {
+      const pdfjsLib = await import("pdfjs-dist");
+      if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
+        pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+          "pdfjs-dist/build/pdf.worker.min.mjs",
+          import.meta.url,
+        ).toString();
+      }
+
+      // Convert data URL to blob URL for pdf.js
+      const [header, base64] = doc.dataUrl.split(",");
+      const mime = header.match(/:(.*?);/)?.[1] || "application/pdf";
+      const bytes = atob(base64);
+      const arr = new Uint8Array(bytes.length);
+      for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+      const blob = new Blob([arr], { type: mime });
+      const blobUrl = URL.createObjectURL(blob);
+
+      const pdf = await pdfjsLib.getDocument(blobUrl).promise;
+      const pageImages: string[] = [];
+
+      for (let p = 1; p <= pdf.numPages; p++) {
+        const page = await pdf.getPage(p);
+        const viewport = page.getViewport({ scale: 2 }); // High res for annotation
+        const canvas = document.createElement("canvas");
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await page.render({ canvasContext: ctx, viewport } as any).promise;
+          pageImages.push(canvas.toDataURL("image/png"));
+        }
+      }
+
+      URL.revokeObjectURL(blobUrl);
+      setPdfPages((prev) => [...prev, { docName: doc.name, pages: pageImages }]);
+    } catch (err) {
+      console.warn("Failed to render PDF pages:", err);
+    } finally {
+      setRenderingPdf(false);
+    }
+  }, []);
+
   if (!loaded) {
     return (
       <div className="flex items-center justify-center h-full text-xs text-muted">
@@ -877,6 +931,9 @@ function ScratchpadTab({ client, photos }: { client: Client; photos: Attachment[
       </div>
     );
   }
+
+  const hasPhotos = photos.length > 0;
+  const hasPdfs = documents.length > 0;
 
   return (
     <div className="flex flex-col h-full">
@@ -903,24 +960,97 @@ function ScratchpadTab({ client, photos }: { client: Client; photos: Attachment[
         </div>
       </div>
 
-      {/* Background image picker */}
+      {/* Background picker */}
       {showBgPicker && (
-        <div className="px-3 py-2 border-b border-border bg-gray-50 shrink-0">
-          <p className="text-[10px] text-muted mb-2">Select a photo as background:</p>
-          {photos.length > 0 ? (
-            <div className="flex gap-2 overflow-x-auto pb-1">
-              {photos.map((photo) => (
-                <button
-                  key={photo.id}
-                  onClick={() => handleSetBackground(photo.dataUrl)}
-                  className="shrink-0 w-16 h-16 rounded-lg overflow-hidden border-2 border-border hover:border-accent active:scale-95"
-                >
-                  <img src={photo.dataUrl} alt={photo.name} className="w-full h-full object-cover" />
-                </button>
-              ))}
+        <div className="px-3 py-2 border-b border-border bg-gray-50 shrink-0 max-h-[40vh] overflow-y-auto">
+          {/* Tabs if both photos and PDFs exist */}
+          {hasPhotos && hasPdfs && (
+            <div className="flex gap-0 mb-2 border-b border-border">
+              <button
+                onClick={() => setBgPickerTab("photos")}
+                className={`px-3 py-1 text-[10px] font-medium relative ${bgPickerTab === "photos" ? "text-accent" : "text-muted"}`}
+              >
+                Photos
+                {bgPickerTab === "photos" && <div className="absolute bottom-0 left-1 right-1 h-0.5 bg-accent rounded-full" />}
+              </button>
+              <button
+                onClick={() => setBgPickerTab("pdfs")}
+                className={`px-3 py-1 text-[10px] font-medium relative ${bgPickerTab === "pdfs" ? "text-accent" : "text-muted"}`}
+              >
+                PDFs
+                {bgPickerTab === "pdfs" && <div className="absolute bottom-0 left-1 right-1 h-0.5 bg-accent rounded-full" />}
+              </button>
             </div>
-          ) : (
-            <p className="text-[10px] text-gray-400">No photos available for this client.</p>
+          )}
+
+          {/* Photos */}
+          {(bgPickerTab === "photos" || !hasPdfs) && hasPhotos && (
+            <div>
+              <p className="text-[10px] text-muted mb-2">Select a photo to annotate:</p>
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {photos.map((photo) => (
+                  <button
+                    key={photo.id}
+                    onClick={() => handleSetBackground(photo.dataUrl)}
+                    className="shrink-0 w-16 h-16 rounded-lg overflow-hidden border-2 border-border hover:border-accent active:scale-95"
+                  >
+                    <img src={photo.dataUrl} alt={photo.name} className="w-full h-full object-cover" />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* PDFs */}
+          {(bgPickerTab === "pdfs" || !hasPhotos) && hasPdfs && (
+            <div>
+              <p className="text-[10px] text-muted mb-2">Select a PDF page to annotate:</p>
+              {/* PDF file list — click to render pages */}
+              <div className="space-y-2">
+                {documents.map((doc) => {
+                  const rendered = pdfPages.find((p) => p.docName === doc.name);
+                  return (
+                    <div key={doc.id}>
+                      {!rendered ? (
+                        <button
+                          onClick={() => handleRenderPdf(doc)}
+                          disabled={renderingPdf}
+                          className="flex items-center gap-2 w-full text-left px-2.5 py-2 rounded-lg border border-border hover:bg-white active:scale-[0.98] disabled:opacity-50"
+                        >
+                          <div className="w-8 h-8 rounded bg-red-100 border border-red-200 flex items-center justify-center text-[9px] font-bold text-red-600">PDF</div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-[11px] font-medium truncate">{doc.name}</p>
+                            <p className="text-[10px] text-muted">{renderingPdf ? "Rendering pages..." : "Tap to load pages"}</p>
+                          </div>
+                        </button>
+                      ) : (
+                        <div>
+                          <p className="text-[10px] font-medium mb-1">{doc.name} ({rendered.pages.length} pages)</p>
+                          <div className="flex gap-2 overflow-x-auto pb-1">
+                            {rendered.pages.map((pageImg, i) => (
+                              <button
+                                key={i}
+                                onClick={() => handleSetBackground(pageImg)}
+                                className="shrink-0 w-16 h-20 rounded-lg overflow-hidden border-2 border-border hover:border-accent active:scale-95 bg-white relative"
+                              >
+                                <img src={pageImg} alt={`Page ${i + 1}`} className="w-full h-full object-contain" />
+                                <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-[8px] text-center py-0.5">
+                                  p.{i + 1}
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {!hasPhotos && !hasPdfs && (
+            <p className="text-[10px] text-gray-400">No photos or documents available for this client.</p>
           )}
         </div>
       )}
