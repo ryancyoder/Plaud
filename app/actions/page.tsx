@@ -367,28 +367,53 @@ export default function ActionsPage() {
         {/* Right scrollable calendar grid */}
         <div className="flex-1 overflow-x-auto overflow-y-auto" ref={calendarScrollRef}>
           <div style={{ width: totalDays * CELL_SIZE, minHeight: "100%" }}>
-            {/* Calendar header with day labels */}
-            <div className="sticky top-0 z-10 bg-surface border-b border-border flex" style={{ height: ROW_HEIGHT }}>
-              {Array.from({ length: totalDays }, (_, i) => {
-                const date = addDays(calendarStart, i);
-                const isToday = date === today;
-                const d = new Date(date + "T00:00:00");
-                const isMonday = d.getDay() === 1;
-                const isFirstOfMonth = d.getDate() === 1;
-                return (
-                  <div
-                    key={date}
-                    className={`shrink-0 flex flex-col items-center justify-center text-[7px] leading-tight border-r border-gray-100 ${
-                      isToday ? "bg-accent/10 font-bold text-accent" : isMonday || isFirstOfMonth ? "text-gray-500" : "text-gray-300"
-                    }`}
-                    style={{ width: CELL_SIZE }}
-                    title={date}
-                  >
-                    <span>{d.toLocaleDateString("en-US", { month: "narrow" })}{d.getDate()}</span>
-                    <span className="text-[6px]">{d.toLocaleDateString("en-US", { weekday: "narrow" })}</span>
-                  </div>
-                );
-              })}
+            {/* Calendar header: month names row + day numbers row */}
+            <div className="sticky top-0 z-10 bg-surface border-b border-border">
+              {/* Month labels row */}
+              <div className="flex" style={{ height: 14 }}>
+                {(() => {
+                  const spans: { month: string; cols: number; startIdx: number }[] = [];
+                  for (let i = 0; i < totalDays; i++) {
+                    const d = new Date(addDays(calendarStart, i) + "T00:00:00");
+                    const label = d.toLocaleDateString("en-US", { month: "short" });
+                    const last = spans[spans.length - 1];
+                    if (last && last.month === label) {
+                      last.cols++;
+                    } else {
+                      spans.push({ month: label, cols: 1, startIdx: i });
+                    }
+                  }
+                  return spans.map((span) => (
+                    <div
+                      key={`${span.month}-${span.startIdx}`}
+                      className="text-[8px] font-semibold text-muted uppercase tracking-wider flex items-end px-1 border-r border-gray-100 overflow-hidden"
+                      style={{ width: span.cols * CELL_SIZE }}
+                    >
+                      {span.month}
+                    </div>
+                  ));
+                })()}
+              </div>
+              {/* Day number row */}
+              <div className="flex" style={{ height: ROW_HEIGHT - 14 }}>
+                {Array.from({ length: totalDays }, (_, i) => {
+                  const date = addDays(calendarStart, i);
+                  const isToday = date === today;
+                  const d = new Date(date + "T00:00:00");
+                  return (
+                    <div
+                      key={date}
+                      className={`shrink-0 flex items-center justify-center border-r border-gray-100 ${
+                        isToday ? "bg-accent/10 text-accent" : "text-foreground"
+                      }`}
+                      style={{ width: CELL_SIZE }}
+                      title={date}
+                    >
+                      <span className="text-[10px] font-bold">{d.getDate()}</span>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
 
             {/* Calendar rows aligned with left panel */}
