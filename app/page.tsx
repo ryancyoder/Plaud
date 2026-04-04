@@ -19,7 +19,7 @@ import {
 import { matchPhotoToEvent, PhotoMatchResult } from "@/lib/photo-matcher";
 import { hasApiKey, processSegmentWithAI } from "@/lib/claude-api";
 import { isToday } from "@/lib/utils";
-import DayCalendar from "@/components/DayCalendar";
+import EventListPanel from "@/components/EventListPanel";
 import ViewerPanel from "@/components/ViewerPanel";
 import ClientRoster from "@/components/ClientRoster";
 import WeekNav from "@/components/WeekNav";
@@ -45,7 +45,7 @@ function todayDateStr(): string {
 }
 
 export default function Dashboard() {
-  const [selectedEvent, setSelectedEvent] = useState<AppEvent | null>(null);
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [events, setEvents] = useState<AppEvent[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
@@ -55,6 +55,19 @@ export default function Dashboard() {
   const [pendingPhotoCount, setPendingPhotoCount] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
   const [mounted, setMounted] = useState(false);
+
+  // Derive selectedEvent from ID
+  const selectedEvent = useMemo(() => {
+    if (!selectedEventId) return null;
+    return events.find((ev) => ev.id === selectedEventId) || null;
+  }, [selectedEventId, events]);
+
+  // Determine viewer mode
+  const viewerMode = useMemo(() => {
+    if (selectedEventId && selectedEvent) return "event" as const;
+    if (sidebarTab === "contacts" && selectedClient) return "client-aggregate" as const;
+    return "day-aggregate" as const;
+  }, [selectedEventId, selectedEvent, sidebarTab, selectedClient]);
 
   useEffect(() => {
     const stored = loadEvents();
@@ -95,20 +108,17 @@ export default function Dashboard() {
     }
   }, [selectedDate, currentWeek]);
 
-  // Filter events by selected client
-  const visibleEvents = useMemo(() => {
-    if (!selectedClient) return events;
-    return events.filter(
-      (ev) =>
-        ev.clientId === selectedClient.id ||
-        ev.mentions?.some((m) => m.toLowerCase() === selectedClient.name.toLowerCase())
-    );
-  }, [events, selectedClient]);
-
-  const selectedDateEvents = useMemo(
-    () => visibleEvents.filter((ev) => ev.date === selectedDate),
-    [visibleEvents, selectedDate]
-  );
+  // Center panel events depend on active sidebar tab
+  const centerPanelEvents = useMemo(() => {
+    if (sidebarTab === "contacts" && selectedClient) {
+      return events.filter(
+        (ev) =>
+          ev.clientId === selectedClient.id ||
+          ev.mentions?.some((m) => m.toLowerCase() === selectedClient.name.toLowerCase())
+      );
+    }
+    return events.filter((ev) => ev.date === selectedDate);
+  }, [sidebarTab, selectedClient, selectedDate, events]);
 
   const eventCountByClient = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -121,6 +131,30 @@ export default function Dashboard() {
     }
     return counts;
   }, [events, clients]);
+
+  // For WeekNav: show all events (not filtered by client) per date
+  const getRecordingsForDate = useCallback(
+    (date: string) => events.filter((ev) => ev.date === date),
+    [events]
+  );
+
+  // Clear drill-down when date changes
+  const handleSelectDate = useCallback((date: string) => {
+    setSelectedDate(date);
+    setSelectedEventId(null);
+  }, []);
+
+  // Clear drill-down and switch context when client changes
+  const handleSelectClient = useCallback((client: Client | null) => {
+    setSelectedClient(client);
+    setSelectedEventId(null);
+  }, []);
+
+  // Clear drill-down when switching sidebar tabs
+  const handleSwitchTab = useCallback((tab: SidebarTab) => {
+    setSidebarTab(tab);
+    setSelectedEventId(null);
+  }, []);
 
   const rematchPendingPhotos = useCallback(async (allEvents: AppEvent[]) => {
     const pending = await loadPendingPhotos();
@@ -167,12 +201,6 @@ export default function Dashboard() {
         saveEvents(forStorage);
         return updated;
       });
-      setSelectedEvent((prev) => {
-        if (!prev) return prev;
-        const m = results.find((r) => r.eventId === prev.id);
-        if (!m) return prev;
-        return { ...prev, attachments: [...(prev.attachments || []), ...m.attachments] };
-      });
     }
 
     const stillPending = pending.length - matchedIds.length;
@@ -202,9 +230,6 @@ export default function Dashboard() {
               })));
               return updated;
             });
-            setSelectedEvent((prev) =>
-              prev?.id === ev.id ? { ...prev, label: result.title, summary: result.summary } : prev
-            );
           } catch {
             // Silently skip failed segments
           }
@@ -220,7 +245,7 @@ export default function Dashboard() {
       clearPendingPhotos().catch(() => {});
       setPendingPhotoCount(0);
       setEvents([]);
-      setSelectedEvent(null);
+      setSelectedEventId(null);
     }
   }, []);
 
@@ -237,7 +262,7 @@ export default function Dashboard() {
       })));
       return updated;
     });
-    setSelectedEvent((prev) => (prev?.id === eventId ? null : prev));
+    setSelectedEventId((prev) => (prev === eventId ? null : prev));
   }, []);
 
   const handleAddAttachments = useCallback(async (eventId: string, newAttachments: Attachment[]) => {
@@ -266,11 +291,6 @@ export default function Dashboard() {
       saveEvents(forStorage);
       return updated;
     });
-    setSelectedEvent((prev) =>
-      prev?.id === eventId
-        ? { ...prev, attachments: [...(prev.attachments || []), ...processed] }
-        : prev
-    );
   }, []);
 
   const handleRemoveAttachment = useCallback(async (eventId: string, attachmentId: string) => {
@@ -289,11 +309,6 @@ export default function Dashboard() {
       saveEvents(forStorage);
       return updated;
     });
-    setSelectedEvent((prev) =>
-      prev?.id === eventId
-        ? { ...prev, attachments: (prev.attachments || []).filter((a) => a.id !== attachmentId) }
-        : prev
-    );
   }, []);
 
   const handleBatchPhotos = useCallback(async (results: PhotoMatchResult[]) => {
@@ -315,13 +330,6 @@ export default function Dashboard() {
       return updated;
     });
 
-    setSelectedEvent((prev) => {
-      if (!prev) return prev;
-      const match = results.find((r) => r.eventId === prev.id);
-      if (!match) return prev;
-      return { ...prev, attachments: [...(prev.attachments || []), ...match.attachments] };
-    });
-
     loadPendingPhotos().then((p) => setPendingPhotoCount(p.length)).catch(() => {});
   }, []);
 
@@ -336,40 +344,7 @@ export default function Dashboard() {
       })));
       return updated;
     });
-    if (selectedEvent?.id === eventId) {
-      setSelectedEvent((prev) =>
-        prev ? { ...prev, clientId } : null
-      );
-    }
-  }, [selectedEvent]);
-
-  const handleSelectClient = useCallback((client: Client | null) => {
-    setSelectedClient(client);
-    if (!client) return;
-    // Find the most recent event for this client and navigate to its date
-    const clientEvents = events
-      .filter(
-        (ev) =>
-          ev.clientId === client.id ||
-          ev.mentions?.some((m) => m.toLowerCase() === client.name.toLowerCase())
-      )
-      .sort((a, b) => b.date.localeCompare(a.date));
-    if (clientEvents.length === 0) return;
-    const targetDate = clientEvents[0].date;
-    setSelectedDate(targetDate);
-    // Calculate week offset so the target date's week is shown
-    const targetMs = new Date(targetDate + "T00:00:00").getTime();
-    const now = new Date();
-    const day = now.getDay();
-    const mondayMs = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (day === 0 ? 6 : day - 1)).getTime();
-    const diffWeeks = Math.floor((targetMs - mondayMs) / (7 * 24 * 60 * 60 * 1000));
-    setWeekOffset(diffWeeks);
-  }, [events]);
-
-  const getRecordingsForDate = useCallback(
-    (date: string) => visibleEvents.filter((ev) => ev.date === date),
-    [visibleEvents]
-  );
+  }, []);
 
   if (!mounted) return null;
 
@@ -424,7 +399,6 @@ export default function Dashboard() {
         </div>
 
         <div className="flex items-center gap-2">
-          {/* Settings */}
           <button
             onClick={() => setShowSettings(true)}
             className="p-1.5 rounded-lg text-muted hover:bg-gray-100 active:scale-95"
@@ -452,10 +426,9 @@ export default function Dashboard() {
       <div className="flex-1 flex overflow-hidden">
         {/* Left: Sidebar with tab toggle */}
         <div className="w-56 shrink-0 border-r border-border overflow-hidden flex flex-col">
-          {/* Sidebar tab switcher */}
           <div className="shrink-0 flex border-b border-border">
             <button
-              onClick={() => setSidebarTab("calendar")}
+              onClick={() => handleSwitchTab("calendar")}
               className={`flex-1 py-2 text-center text-xs font-medium transition-colors relative ${
                 sidebarTab === "calendar" ? "text-accent" : "text-muted hover:text-foreground"
               }`}
@@ -470,7 +443,7 @@ export default function Dashboard() {
               {sidebarTab === "calendar" && <div className="absolute bottom-0 left-2 right-2 h-0.5 bg-accent rounded-full" />}
             </button>
             <button
-              onClick={() => setSidebarTab("contacts")}
+              onClick={() => handleSwitchTab("contacts")}
               className={`flex-1 py-2 text-center text-xs font-medium transition-colors relative ${
                 sidebarTab === "contacts" ? "text-accent" : "text-muted hover:text-foreground"
               }`}
@@ -484,13 +457,12 @@ export default function Dashboard() {
             </button>
           </div>
 
-          {/* Sidebar content */}
           <div className="flex-1 overflow-hidden">
             {sidebarTab === "calendar" ? (
               <WeekNav
                 weekDates={currentWeek}
                 selectedDate={selectedDate}
-                onSelectDate={setSelectedDate}
+                onSelectDate={handleSelectDate}
                 getRecordingsForDate={getRecordingsForDate}
               />
             ) : (
@@ -505,14 +477,16 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Center: Day Calendar */}
+        {/* Center: Event List */}
         <div className="flex-1 flex flex-col overflow-hidden border-r border-border">
-          <DayCalendar
+          <EventListPanel
+            mode={sidebarTab === "contacts" && selectedClient ? "client" : "date"}
             date={selectedDate}
-            events={selectedDateEvents}
-            onSelectEvent={setSelectedEvent}
+            client={selectedClient}
+            events={centerPanelEvents}
+            selectedEventId={selectedEventId}
+            onSelectEvent={setSelectedEventId}
             onDeleteEvent={handleDeleteEvent}
-            selectedEventId={selectedEvent?.id}
           />
         </div>
 
@@ -522,10 +496,13 @@ export default function Dashboard() {
             selectedEvent={selectedEvent}
             selectedClient={selectedClient}
             clients={clients}
-            onClose={() => setSelectedEvent(null)}
+            onClose={() => setSelectedEventId(null)}
             onAssignClient={handleAssignClient}
             onAddAttachments={handleAddAttachments}
             onRemoveAttachment={handleRemoveAttachment}
+            viewMode={viewerMode}
+            aggregateEvents={centerPanelEvents}
+            selectedDate={selectedDate}
           />
         </div>
       </div>

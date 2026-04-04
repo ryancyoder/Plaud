@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { AppEvent, Attachment, Client } from "@/lib/types";
 import { formatDuration, getTagColor, formatDate } from "@/lib/utils";
-import { hasApiKey, getCachedSegmentSummary, generateSegmentSummary } from "@/lib/claude-api";
+import { hasApiKey, getCachedSegmentSummary, generateSegmentSummary, getCachedSummary, generateDailySummary } from "@/lib/claude-api";
 import { getPhotosForClient } from "@/lib/event-store";
 
 type Tab = "transcript" | "photos";
+type ViewMode = "event" | "client-aggregate" | "day-aggregate";
 
 interface ViewerPanelProps {
   selectedEvent: AppEvent | null;
@@ -16,6 +17,9 @@ interface ViewerPanelProps {
   onAssignClient: (eventId: string, clientId: string | undefined) => void;
   onAddAttachments: (eventId: string, attachments: Attachment[]) => void;
   onRemoveAttachment: (eventId: string, attachmentId: string) => void;
+  viewMode: ViewMode;
+  aggregateEvents: AppEvent[];
+  selectedDate: string;
 }
 
 export default function ViewerPanel({
@@ -26,13 +30,28 @@ export default function ViewerPanel({
   onAssignClient,
   onAddAttachments,
   onRemoveAttachment,
+  viewMode,
+  aggregateEvents,
+  selectedDate,
 }: ViewerPanelProps) {
   const [activeTab, setActiveTab] = useState<Tab>("transcript");
 
-  const photoCount = selectedEvent?.attachments?.filter((a) => a.mimeType.startsWith("image/")).length ?? 0;
+  // Photo count depends on mode
+  const photoCount = useMemo(() => {
+    if (viewMode === "event" && selectedEvent) {
+      return selectedEvent.attachments?.filter((a) => a.mimeType.startsWith("image/")).length ?? 0;
+    }
+    if (viewMode === "client-aggregate" && selectedClient) {
+      return getPhotosForClient(selectedClient.id).length;
+    }
+    if (viewMode === "day-aggregate") {
+      return aggregateEvents.reduce((n, ev) => n + (ev.attachments?.filter((a) => a.mimeType.startsWith("image/")).length ?? 0), 0);
+    }
+    return 0;
+  }, [viewMode, selectedEvent, selectedClient, aggregateEvents]);
 
   const tabs: { key: Tab; label: string; count?: number }[] = [
-    { key: "transcript", label: "Transcript" },
+    { key: "transcript", label: viewMode === "event" ? "Detail" : "Overview" },
     { key: "photos", label: "Photos", count: photoCount },
   ];
 
@@ -60,18 +79,30 @@ export default function ViewerPanel({
 
       <div className="flex-1 overflow-y-auto">
         {activeTab === "transcript" && (
-          <EventView
-            event={selectedEvent}
-            clients={clients}
-            onClose={onClose}
-            onAssignClient={onAssignClient}
-            onAddAttachments={onAddAttachments}
-          />
+          <>
+            {viewMode === "event" && (
+              <EventView
+                event={selectedEvent}
+                clients={clients}
+                onClose={onClose}
+                onAssignClient={onAssignClient}
+                onAddAttachments={onAddAttachments}
+              />
+            )}
+            {viewMode === "client-aggregate" && (
+              <ClientAggregateView client={selectedClient} events={aggregateEvents} />
+            )}
+            {viewMode === "day-aggregate" && (
+              <DayAggregateView date={selectedDate} events={aggregateEvents} />
+            )}
+          </>
         )}
         {activeTab === "photos" && (
           <PhotoGallery
             event={selectedEvent}
+            viewMode={viewMode}
             selectedClient={selectedClient}
+            aggregateEvents={aggregateEvents}
             onAddAttachments={onAddAttachments}
             onRemoveAttachment={onRemoveAttachment}
           />
@@ -80,6 +111,8 @@ export default function ViewerPanel({
     </div>
   );
 }
+
+// --- Single Event Detail View (existing, unchanged) ---
 
 function EventView({
   event,
@@ -125,7 +158,7 @@ function EventView({
             <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
             <path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" x2="12" y1="19" y2="22" />
           </svg>
-          Select a recording from the calendar to view details
+          Select an event to view details
         </div>
       </div>
     );
@@ -283,6 +316,183 @@ function EventView({
   );
 }
 
+// --- Client Aggregate View ---
+
+function ClientAggregateView({ client, events }: { client: Client | null; events: AppEvent[] }) {
+  if (!client) {
+    return (
+      <div className="flex items-center justify-center h-full text-muted text-sm p-8 text-center">
+        <div>
+          <svg className="w-12 h-12 mx-auto mb-3 text-gray-200" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" />
+          </svg>
+          Select a client to view their history
+        </div>
+      </div>
+    );
+  }
+
+  const recordings = events.filter((e) => e.type === "recording");
+  const totalDuration = recordings.reduce((s, e) => s + (e.duration || 0), 0);
+
+  // Group by date
+  const grouped = useMemo(() => {
+    const sorted = [...events].sort((a, b) => b.date.localeCompare(a.date));
+    const groups: { date: string; events: AppEvent[] }[] = [];
+    for (const ev of sorted) {
+      const last = groups[groups.length - 1];
+      if (last && last.date === ev.date) {
+        last.events.push(ev);
+      } else {
+        groups.push({ date: ev.date, events: [ev] });
+      }
+    }
+    return groups;
+  }, [events]);
+
+  return (
+    <div className="p-4">
+      <div className="mb-4">
+        <h2 className="text-sm font-bold">{client.name}</h2>
+        {client.company && <p className="text-xs text-muted">{client.company}</p>}
+        <div className="flex gap-3 mt-2 text-xs text-muted">
+          <span>{events.length} event{events.length !== 1 ? "s" : ""}</span>
+          <span>{recordings.length} recording{recordings.length !== 1 ? "s" : ""}</span>
+          {totalDuration > 0 && <span>{formatDuration(totalDuration)} total</span>}
+        </div>
+      </div>
+
+      {grouped.length === 0 ? (
+        <p className="text-xs text-gray-300 text-center py-8">No events yet</p>
+      ) : (
+        <div className="space-y-4">
+          {grouped.map((group) => (
+            <div key={group.date}>
+              <div className="text-[10px] font-bold uppercase text-muted tracking-wider mb-1.5">
+                {formatDate(group.date)}
+              </div>
+              <div className="space-y-2">
+                {group.events.map((ev) => (
+                  <div key={ev.id} className="rounded-lg border border-border p-3">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-[10px] text-muted tabular-nums">{ev.startTime || ""}</span>
+                      <span className="text-xs font-semibold">{ev.label}</span>
+                      <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500 capitalize">{ev.type.replace("-", " ")}</span>
+                    </div>
+                    {ev.summary && (
+                      <p className="text-xs text-gray-600 leading-relaxed line-clamp-3">{ev.summary}</p>
+                    )}
+                    {ev.fullTranscript && !ev.summary && (
+                      <p className="text-xs text-gray-600 leading-relaxed line-clamp-3">{ev.fullTranscript.slice(0, 200)}...</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// --- Day Aggregate View ---
+
+function DayAggregateView({ date, events }: { date: string; events: AppEvent[] }) {
+  const [aiSummary, setAiSummary] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const recordings = events.filter((e) => e.type === "recording");
+  const sorted = [...events].sort((a, b) => (a.startTime || "").localeCompare(b.startTime || ""));
+  const totalDuration = recordings.reduce((s, e) => s + (e.duration || 0), 0);
+
+  useEffect(() => {
+    const cached = getCachedSummary(date);
+    if (cached) setAiSummary(cached);
+    else setAiSummary(null);
+  }, [date]);
+
+  const handleGenerate = useCallback(async () => {
+    if (!hasApiKey()) { setError("Set your Claude API key in Settings first"); return; }
+    setLoading(true); setError(null);
+    try {
+      const segments = recordings.map((ev) => ({
+        startTime: ev.startTime || "00:00",
+        duration: ev.duration || 0,
+        title: ev.label,
+        text: ev.fullTranscript || ev.summary || ev.label,
+      }));
+      const result = await generateDailySummary(date, segments);
+      setAiSummary(result);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to generate summary");
+    } finally { setLoading(false); }
+  }, [date, recordings]);
+
+  return (
+    <div className="p-4">
+      <div className="mb-4">
+        <h2 className="text-sm font-bold">{formatDate(date)}</h2>
+        <div className="flex gap-3 mt-1 text-xs text-muted">
+          <span>{events.length} event{events.length !== 1 ? "s" : ""}</span>
+          {recordings.length > 0 && <span>{recordings.length} recording{recordings.length !== 1 ? "s" : ""}</span>}
+          {totalDuration > 0 && <span>{formatDuration(totalDuration)}</span>}
+        </div>
+      </div>
+
+      {/* AI Summary */}
+      {recordings.length > 0 && (
+        <div className="mb-4">
+          {aiSummary ? (
+            <div>
+              <div className="flex items-center gap-1.5 mb-1.5">
+                <span className="text-[10px] font-semibold uppercase text-purple-600">AI Daily Summary</span>
+                <button onClick={handleGenerate} disabled={loading} className="text-[10px] text-muted hover:text-purple-600 disabled:opacity-50">
+                  {loading ? "Generating..." : "↻ Regenerate"}
+                </button>
+              </div>
+              <div className="text-sm text-gray-700 leading-relaxed prose-sm rounded-lg bg-purple-50/50 border border-purple-100 p-3"
+                dangerouslySetInnerHTML={{ __html: renderMarkdown(aiSummary) }} />
+            </div>
+          ) : (
+            <div>
+              <button onClick={handleGenerate} disabled={loading}
+                className="text-[11px] px-3 py-1.5 rounded-lg border border-purple-200 text-purple-600 font-medium hover:bg-purple-50 active:scale-95 disabled:opacity-50">
+                {loading ? "Generating..." : "Generate AI Daily Summary"}
+              </button>
+              {error && <p className="text-[10px] text-red-500 mt-1">{error}</p>}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Event list */}
+      {sorted.length === 0 ? (
+        <p className="text-xs text-gray-300 text-center py-8">No events on this day</p>
+      ) : (
+        <div className="space-y-2">
+          {sorted.map((ev) => (
+            <div key={ev.id} className="rounded-lg border border-border p-3">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-[10px] text-muted tabular-nums">{ev.startTime || ""}</span>
+                <span className="text-xs font-semibold">{ev.label}</span>
+                {ev.duration && <span className="text-[10px] text-muted">{formatDuration(ev.duration)}</span>}
+                <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500 capitalize">{ev.type.replace("-", " ")}</span>
+              </div>
+              {ev.summary && (
+                <p className="text-xs text-gray-600 leading-relaxed line-clamp-3">{ev.summary}</p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// --- Shared Utilities ---
+
 function renderMarkdown(md: string): string {
   return md
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
@@ -321,18 +531,20 @@ function handleFileAttach(
   Promise.all(promises).then((attachments) => onAddAttachments(eventId, attachments));
 }
 
-/**
- * Photos tab — shows all photos for the selected client (across all their events),
- * or photos on the selected event if no client is selected.
- */
+// --- Photos Tab ---
+
 function PhotoGallery({
   event,
+  viewMode,
   selectedClient,
+  aggregateEvents,
   onAddAttachments,
   onRemoveAttachment,
 }: {
   event: AppEvent | null;
+  viewMode: ViewMode;
   selectedClient: Client | null;
+  aggregateEvents: AppEvent[];
   onAddAttachments: (eventId: string, attachments: Attachment[]) => void;
   onRemoveAttachment: (eventId: string, attachmentId: string) => void;
 }) {
@@ -340,13 +552,32 @@ function PhotoGallery({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const touchStartX = useRef(0);
 
-  // If a client is selected, show ALL their photos across events. Otherwise show event photos.
-  const clientPhotos = selectedClient ? getPhotosForClient(selectedClient.id) : [];
-  const eventPhotos = event?.attachments?.filter((a) => a.mimeType.startsWith("image/")) || [];
-
-  const photos = selectedClient
-    ? clientPhotos.map((cp) => ({ ...cp.attachment, eventLabel: cp.event.label, eventDate: cp.event.date }))
-    : eventPhotos.map((a) => ({ ...a, eventLabel: event?.label || "", eventDate: event?.date || "" }));
+  const photos = useMemo(() => {
+    if (viewMode === "event" && event) {
+      return (event.attachments || [])
+        .filter((a) => a.mimeType.startsWith("image/"))
+        .map((a) => ({ ...a, eventLabel: event.label, eventDate: event.date }));
+    }
+    if (viewMode === "client-aggregate" && selectedClient) {
+      return getPhotosForClient(selectedClient.id).map((cp) => ({
+        ...cp.attachment,
+        eventLabel: cp.event.label,
+        eventDate: cp.event.date,
+      }));
+    }
+    if (viewMode === "day-aggregate") {
+      const result: (Attachment & { eventLabel: string; eventDate: string })[] = [];
+      for (const ev of aggregateEvents) {
+        for (const att of ev.attachments || []) {
+          if (att.mimeType.startsWith("image/")) {
+            result.push({ ...att, eventLabel: ev.label, eventDate: ev.date });
+          }
+        }
+      }
+      return result;
+    }
+    return [];
+  }, [viewMode, event, selectedClient, aggregateEvents]);
 
   const handleSwipe = useCallback(
     (direction: "left" | "right") => {
@@ -357,15 +588,17 @@ function PhotoGallery({
     [lightboxIndex, photos.length],
   );
 
-  const heading = selectedClient
+  const heading = viewMode === "client-aggregate" && selectedClient
     ? `${selectedClient.name}'s Photos (${photos.length})`
     : `${photos.length} photo${photos.length !== 1 ? "s" : ""}`;
+
+  const canUpload = viewMode === "event" && event;
 
   return (
     <div className="p-3">
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-xs font-semibold">{heading}</h3>
-        {event && (
+        {canUpload && (
           <div>
             <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden"
               onChange={(e) => { const f = e.target.files; if (f && f.length > 0) { handleFileAttach(f, event.id, onAddAttachments); e.target.value = ""; } }} />
@@ -379,12 +612,12 @@ function PhotoGallery({
           {photos.map((img, i) => (
             <button key={img.id} onClick={() => setLightboxIndex(i)} className="aspect-square rounded-lg overflow-hidden border border-border relative group">
               <img src={img.dataUrl} alt={img.name} className="w-full h-full object-cover" />
-              {selectedClient && (
+              {viewMode !== "event" && (
                 <div className="absolute bottom-0 left-0 right-0 bg-black/50 px-1.5 py-0.5">
                   <span className="text-[8px] text-white truncate block">{img.eventDate}</span>
                 </div>
               )}
-              {event && !selectedClient && (
+              {viewMode === "event" && event && (
                 <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity">
                   <button
                     onClick={(e) => { e.stopPropagation(); onRemoveAttachment(event.id, img.id); }}
