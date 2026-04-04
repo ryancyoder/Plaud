@@ -4,6 +4,7 @@ import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { AppEvent, Attachment, Client } from "@/lib/types";
 import { formatDuration, getTagColor, formatDate } from "@/lib/utils";
 import { hasApiKey, getCachedSegmentSummary, generateSegmentSummary, getCachedSummary, generateDailySummary } from "@/lib/claude-api";
+import PdfViewer from "@/components/PdfViewer";
 
 type Tab = "transcript" | "photos" | "documents";
 type ViewMode = "event" | "client-aggregate" | "day-aggregate";
@@ -728,14 +729,9 @@ function DocumentList({
 
               {/* Inline PDF preview */}
               {inlinePreviewId === doc.id && isPdf(doc.mimeType) && (
-                <div className="mt-1 rounded-lg border border-border overflow-hidden bg-gray-100">
+                <div className="mt-1 rounded-lg border border-border overflow-hidden bg-gray-100 overflow-y-auto" style={{ maxHeight: "60vh" }}>
                   {blobUrls[doc.id] ? (
-                    <iframe
-                      src={blobUrls[doc.id]}
-                      className="w-full border-0"
-                      style={{ height: "60vh" }}
-                      title={doc.name}
-                    />
+                    <PdfViewer src={blobUrls[doc.id]} />
                   ) : (
                     <div className="flex items-center justify-center py-12 text-xs text-muted">
                       Loading preview...
@@ -785,13 +781,9 @@ function DocumentList({
               </button>
             </div>
           </div>
-          <div className="flex-1 min-h-0" onClick={(e) => e.stopPropagation()}>
+          <div className="flex-1 min-h-0 overflow-y-auto bg-gray-800" onClick={(e) => e.stopPropagation()}>
             {blobUrls[fullscreenDoc.id] ? (
-              <iframe
-                src={blobUrls[fullscreenDoc.id]}
-                className="w-full h-full border-0"
-                title={fullscreenDoc.name}
-              />
+              <PdfViewer src={blobUrls[fullscreenDoc.id]} />
             ) : (
               <div className="flex items-center justify-center h-full text-white/60 text-sm">
                 Loading PDF...
