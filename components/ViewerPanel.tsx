@@ -608,7 +608,10 @@ function DocumentList({
   const [inlinePreviewId, setInlinePreviewId] = useState<string | null>(null);
   const [fullscreenDoc, setFullscreenDoc] = useState<(Attachment & { eventId: string }) | null>(null);
   const [blobUrls, setBlobUrls] = useState<Record<string, string>>({});
+  const [markupHint, setMarkupHint] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const reimportInputRef = useRef<HTMLInputElement>(null);
+  const reimportEventIdRef = useRef<string | null>(null);
 
   // Clean up blob URLs on unmount
   useEffect(() => {
@@ -690,7 +693,7 @@ function DocumentList({
   }, [getBlobUrl]);
 
   // Share PDF via iOS share sheet (gives access to Markup, Files, etc.)
-  const handleShare = useCallback(async (doc: Attachment) => {
+  const handleShare = useCallback(async (doc: Attachment & { eventId: string }) => {
     try {
       const url = getBlobUrl(doc);
       if (!url) return;
@@ -699,17 +702,46 @@ function DocumentList({
       const file = new File([blob], doc.name, { type: doc.mimeType });
       if (navigator.share && navigator.canShare?.({ files: [file] })) {
         await navigator.share({ files: [file], title: doc.name });
+        // After share completes, show re-import hint
+        setMarkupHint(doc.eventId);
+        setTimeout(() => setMarkupHint(null), 15000);
       } else {
         // Fallback: open in new tab
         window.open(url, "_blank");
+        setMarkupHint(doc.eventId);
+        setTimeout(() => setMarkupHint(null), 15000);
       }
     } catch {
-      // User cancelled share or not supported — ignore
+      // User cancelled share — ignore
     }
   }, [getBlobUrl]);
 
+  // Re-import annotated file back into the event
+  const handleReimport = useCallback((eventId: string) => {
+    reimportEventIdRef.current = eventId;
+    reimportInputRef.current?.click();
+  }, []);
+
+  const handleReimportFile = useCallback((files: FileList | null) => {
+    if (!files || files.length === 0 || !reimportEventIdRef.current) return;
+    const eventId = reimportEventIdRef.current;
+    handleFileAttach(files, eventId, onAddAttachments);
+    setMarkupHint(null);
+    reimportEventIdRef.current = null;
+  }, [onAddAttachments]);
+
   return (
     <div className="p-3">
+      {/* Hidden file input for re-importing annotated files */}
+      <input
+        ref={reimportInputRef}
+        type="file"
+        accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.csv,image/*"
+        multiple
+        className="hidden"
+        onChange={(e) => { handleReimportFile(e.target.files); e.target.value = ""; }}
+      />
+
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-xs font-semibold">{heading}</h3>
         {canUpload && (
@@ -783,6 +815,21 @@ function DocumentList({
                   )}
                 </div>
               </div>
+
+              {/* Re-import hint after Markup */}
+              {markupHint === doc.eventId && (
+                <div className="mt-1 p-2.5 rounded-lg bg-purple-50 border border-purple-200">
+                  <p className="text-[11px] text-purple-700 mb-2">
+                    Done annotating? Save to Files in the share sheet, then tap below to bring it back.
+                  </p>
+                  <button
+                    onClick={() => handleReimport(doc.eventId)}
+                    className="text-[11px] px-3 py-1.5 rounded-lg bg-purple-600 text-white font-medium hover:bg-purple-700 active:scale-95"
+                  >
+                    Import Annotated File
+                  </button>
+                </div>
+              )}
 
               {/* Inline PDF preview */}
               {inlinePreviewId === doc.id && isPdf(doc.mimeType) && (
