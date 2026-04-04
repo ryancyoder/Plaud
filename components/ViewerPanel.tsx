@@ -552,6 +552,20 @@ function handleFileAttach(
 
 // --- Documents Tab ---
 
+/**
+ * Convert a base64 data URL to a blob URL that browsers (especially iOS Safari)
+ * can render in iframes/object tags. Data URLs often fail for PDF rendering.
+ */
+function dataUrlToBlobUrl(dataUrl: string): string {
+  const [header, base64] = dataUrl.split(",");
+  const mime = header.match(/:(.*?);/)?.[1] || "application/pdf";
+  const bytes = atob(base64);
+  const arr = new Uint8Array(bytes.length);
+  for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+  const blob = new Blob([arr], { type: mime });
+  return URL.createObjectURL(blob);
+}
+
 function DocumentList({
   event,
   viewMode,
@@ -567,8 +581,25 @@ function DocumentList({
   onAddAttachments: (eventId: string, attachments: Attachment[]) => void;
   onRemoveAttachment: (eventId: string, attachmentId: string) => void;
 }) {
-  const [previewDoc, setPreviewDoc] = useState<(Attachment & { eventId: string }) | null>(null);
+  const [inlinePreviewId, setInlinePreviewId] = useState<string | null>(null);
+  const [fullscreenDoc, setFullscreenDoc] = useState<(Attachment & { eventId: string }) | null>(null);
+  const [blobUrls, setBlobUrls] = useState<Record<string, string>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Clean up blob URLs on unmount
+  useEffect(() => {
+    return () => {
+      Object.values(blobUrls).forEach(URL.revokeObjectURL);
+    };
+  }, [blobUrls]);
+
+  const getBlobUrl = useCallback((doc: Attachment): string => {
+    if (blobUrls[doc.id]) return blobUrls[doc.id];
+    if (!doc.dataUrl) return "";
+    const url = dataUrlToBlobUrl(doc.dataUrl);
+    setBlobUrls((prev) => ({ ...prev, [doc.id]: url }));
+    return url;
+  }, [blobUrls]);
 
   const docs = useMemo(() => {
     const isDoc = (a: Attachment) => !a.mimeType.startsWith("image/");
@@ -614,6 +645,20 @@ function DocumentList({
     return "bg-gray-100 text-gray-600 border-gray-200";
   };
 
+  const handleTogglePreview = useCallback((doc: Attachment & { eventId: string }) => {
+    if (inlinePreviewId === doc.id) {
+      setInlinePreviewId(null);
+    } else {
+      getBlobUrl(doc); // pre-generate
+      setInlinePreviewId(doc.id);
+    }
+  }, [inlinePreviewId, getBlobUrl]);
+
+  const handleFullscreen = useCallback((doc: Attachment & { eventId: string }) => {
+    getBlobUrl(doc); // pre-generate
+    setFullscreenDoc(doc);
+  }, [getBlobUrl]);
+
   return (
     <div className="p-3">
       <div className="flex items-center justify-between mb-3">
@@ -630,47 +675,74 @@ function DocumentList({
       {docs.length > 0 ? (
         <div className="space-y-2">
           {docs.map((doc) => (
-            <div key={doc.id} className="flex items-center gap-3 p-2.5 rounded-lg border border-border hover:bg-gray-50 group">
-              {/* File type badge */}
-              <div className={`shrink-0 w-10 h-10 rounded-lg border flex items-center justify-center text-[10px] font-bold ${getFileColor(doc.mimeType)}`}>
-                {getFileIcon(doc.mimeType)}
-              </div>
+            <div key={doc.id}>
+              <div className="flex items-center gap-3 p-2.5 rounded-lg border border-border hover:bg-gray-50 group">
+                {/* File type badge */}
+                <div className={`shrink-0 w-10 h-10 rounded-lg border flex items-center justify-center text-[10px] font-bold ${getFileColor(doc.mimeType)}`}>
+                  {getFileIcon(doc.mimeType)}
+                </div>
 
-              {/* File info */}
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-medium truncate">{doc.name}</p>
-                <p className="text-[10px] text-muted">
-                  {viewMode !== "event" && <span>{doc.eventDate} &middot; </span>}
-                  {doc.mimeType.split("/").pop()?.toUpperCase()}
-                </p>
-              </div>
-
-              {/* Actions */}
-              <div className="flex items-center gap-1.5 shrink-0">
-                {isPdf(doc.mimeType) && (
-                  <button
-                    onClick={() => setPreviewDoc(doc)}
-                    className="text-[10px] px-2 py-1 rounded border border-accent text-accent hover:bg-accent-light active:scale-95 font-medium"
-                  >
-                    View
-                  </button>
-                )}
-                <a
-                  href={doc.dataUrl}
-                  download={doc.name}
-                  className="text-[10px] px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-100 active:scale-95 font-medium"
+                {/* File info — tap to preview PDFs */}
+                <button
+                  className="flex-1 min-w-0 text-left"
+                  onClick={() => isPdf(doc.mimeType) ? handleTogglePreview(doc) : undefined}
                 >
-                  Save
-                </a>
-                {viewMode === "event" && event && (
-                  <button
-                    onClick={() => onRemoveAttachment(event.id, doc.id)}
-                    className="text-[10px] px-1.5 py-1 rounded border border-red-200 text-red-400 hover:bg-red-50 active:scale-95 opacity-0 group-hover:opacity-100 transition-opacity"
+                  <p className="text-xs font-medium truncate">{doc.name}</p>
+                  <p className="text-[10px] text-muted">
+                    {viewMode !== "event" && <span>{doc.eventDate} &middot; </span>}
+                    {doc.mimeType.split("/").pop()?.toUpperCase()}
+                    {isPdf(doc.mimeType) && <span className="text-accent ml-1">Tap to preview</span>}
+                  </p>
+                </button>
+
+                {/* Actions */}
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {isPdf(doc.mimeType) && (
+                    <button
+                      onClick={() => handleFullscreen(doc)}
+                      className="text-[10px] px-2 py-1 rounded border border-accent text-accent hover:bg-accent-light active:scale-95 font-medium"
+                      title="Full screen"
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
+                      </svg>
+                    </button>
+                  )}
+                  <a
+                    href={doc.dataUrl || blobUrls[doc.id] || "#"}
+                    download={doc.name}
+                    className="text-[10px] px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-100 active:scale-95 font-medium"
                   >
-                    x
-                  </button>
-                )}
+                    Save
+                  </a>
+                  {viewMode === "event" && event && (
+                    <button
+                      onClick={() => onRemoveAttachment(event.id, doc.id)}
+                      className="text-[10px] px-1.5 py-1 rounded border border-red-200 text-red-400 hover:bg-red-50 active:scale-95 opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      x
+                    </button>
+                  )}
+                </div>
               </div>
+
+              {/* Inline PDF preview */}
+              {inlinePreviewId === doc.id && isPdf(doc.mimeType) && (
+                <div className="mt-1 rounded-lg border border-border overflow-hidden bg-gray-100">
+                  {blobUrls[doc.id] ? (
+                    <iframe
+                      src={blobUrls[doc.id]}
+                      className="w-full border-0"
+                      style={{ height: "60vh" }}
+                      title={doc.name}
+                    />
+                  ) : (
+                    <div className="flex items-center justify-center py-12 text-xs text-muted">
+                      Loading preview...
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -689,38 +761,42 @@ function DocumentList({
         </div>
       )}
 
-      {/* PDF Preview Modal */}
-      {previewDoc && isPdf(previewDoc.mimeType) && (
-        <div className="fixed inset-0 z-50 bg-black/80 flex flex-col" onClick={() => setPreviewDoc(null)}>
-          {/* Header bar */}
+      {/* Full-screen PDF viewer */}
+      {fullscreenDoc && isPdf(fullscreenDoc.mimeType) && (
+        <div className="fixed inset-0 z-50 bg-black/80 flex flex-col" onClick={() => setFullscreenDoc(null)}>
           <div className="flex items-center justify-between px-4 py-3 bg-gray-900 shrink-0" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center gap-3 min-w-0">
               <div className="w-8 h-8 rounded bg-red-500/20 flex items-center justify-center text-[10px] font-bold text-red-300">PDF</div>
-              <span className="text-sm text-white truncate">{previewDoc.name}</span>
+              <span className="text-sm text-white truncate">{fullscreenDoc.name}</span>
             </div>
             <div className="flex items-center gap-2 shrink-0">
               <a
-                href={previewDoc.dataUrl}
-                download={previewDoc.name}
+                href={blobUrls[fullscreenDoc.id] || fullscreenDoc.dataUrl}
+                download={fullscreenDoc.name}
                 className="text-xs px-3 py-1.5 rounded-lg bg-white/10 text-white hover:bg-white/20 active:scale-95"
                 onClick={(e) => e.stopPropagation()}
               >
                 Download
               </a>
-              <button onClick={() => setPreviewDoc(null)} className="text-white/70 hover:text-white p-1">
+              <button onClick={() => setFullscreenDoc(null)} className="text-white/70 hover:text-white p-1">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M6 6l12 12M18 6L6 18" />
                 </svg>
               </button>
             </div>
           </div>
-          {/* PDF embed */}
           <div className="flex-1 min-h-0" onClick={(e) => e.stopPropagation()}>
-            <iframe
-              src={previewDoc.dataUrl}
-              className="w-full h-full border-0"
-              title={previewDoc.name}
-            />
+            {blobUrls[fullscreenDoc.id] ? (
+              <iframe
+                src={blobUrls[fullscreenDoc.id]}
+                className="w-full h-full border-0"
+                title={fullscreenDoc.name}
+              />
+            ) : (
+              <div className="flex items-center justify-center h-full text-white/60 text-sm">
+                Loading PDF...
+              </div>
+            )}
           </div>
         </div>
       )}
