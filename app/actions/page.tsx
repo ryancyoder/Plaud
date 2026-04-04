@@ -262,7 +262,7 @@ export default function ActionsPage() {
         <NavButtons />
       </header>
 
-      {/* Main content: fixed left + scrollable calendar right */}
+      {/* Main content: fixed left | scrollable calendar | fixed right hours */}
       <div className="flex-1 flex overflow-hidden">
         {/* Left fixed columns: Client | NextAction | Done */}
         <div className="shrink-0 flex flex-col overflow-y-auto border-r-2 border-border" style={{ width: 420 }}>
@@ -364,7 +364,7 @@ export default function ActionsPage() {
           ))}
         </div>
 
-        {/* Right scrollable calendar grid */}
+        {/* Scrollable calendar grid */}
         <div className="flex-1 overflow-x-auto overflow-y-auto" ref={calendarScrollRef}>
           <div style={{ width: totalDays * CELL_SIZE, minHeight: "100%" }}>
             {/* Calendar header: month names row + day numbers row */}
@@ -438,6 +438,42 @@ export default function ActionsPage() {
               </div>
             ))}
           </div>
+        </div>
+
+        {/* Right fixed column: Total Hours */}
+        <div className="shrink-0 flex flex-col overflow-y-auto border-l-2 border-border" style={{ width: 56 }}>
+          {/* Header */}
+          <div className="sticky top-0 z-10 bg-surface border-b border-border flex items-center justify-center text-[9px] font-semibold uppercase text-muted" style={{ height: ROW_HEIGHT }}>
+            Hrs
+          </div>
+
+          {/* Rows */}
+          {grouped.map((group) => (
+            <div key={group.status}>
+              {/* Status group header spacer */}
+              <div className={`border-b border-t border-border ${group.color}`} style={{ height: ROW_HEIGHT - 4 }} />
+
+              {group.clients.map((client) => {
+                const events = clientEventsMap.get(client.id) || [];
+                const totalMinutes = events.reduce((sum, ev) => sum + (ev.duration || 0), 0);
+                const hours = totalMinutes / 60;
+                return (
+                  <div
+                    key={client.id}
+                    className="flex items-center justify-center border-b border-border"
+                    style={{ height: ROW_HEIGHT }}
+                    title={`${totalMinutes} minutes total`}
+                  >
+                    {totalMinutes > 0 ? (
+                      <span className="text-[10px] font-bold text-foreground">{hours < 10 ? hours.toFixed(1) : Math.round(hours)}</span>
+                    ) : (
+                      <span className="text-[10px] text-gray-300">-</span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
         </div>
       </div>
     </div>
