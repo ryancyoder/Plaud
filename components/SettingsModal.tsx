@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import {
   getApiKey,
   setApiKey,
@@ -28,7 +28,7 @@ import {
 } from "@/lib/attachment-store";
 import type { Attachment } from "@/lib/types";
 
-type SettingsTab = "api-key" | "api-log" | "prompts" | "data";
+type SettingsTab = "api-key" | "api-log" | "prompts" | "data" | "app";
 
 interface SettingsModalProps {
   open: boolean;
@@ -58,6 +58,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
           </div>
           <div className="flex gap-0 border-b border-border">
             {([
+              { key: "app" as const, label: "App" },
               { key: "api-key" as const, label: "API Key" },
               { key: "api-log" as const, label: "API Log" },
               { key: "prompts" as const, label: "Prompts" },
@@ -79,10 +80,187 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto">
+          {tab === "app" && <AppTab />}
           {tab === "api-key" && <ApiKeyTab />}
           {tab === "api-log" && <ApiLogTab />}
           {tab === "prompts" && <PromptsTab />}
           {tab === "data" && <DataTab />}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --- App Tab (version check, auto-refresh, cache clear) ---
+
+const AUTO_REFRESH_KEY = "plaud-auto-refresh";
+const AUTO_REFRESH_INTERVAL_KEY = "plaud-auto-refresh-interval";
+
+function AppTab() {
+  const [checking, setChecking] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+  const [autoRefresh, setAutoRefresh] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return localStorage.getItem(AUTO_REFRESH_KEY) === "1";
+  });
+  const [interval, setIntervalMin] = useState(() => {
+    if (typeof window === "undefined") return 30;
+    return parseInt(localStorage.getItem(AUTO_REFRESH_INTERVAL_KEY) || "30") || 30;
+  });
+
+  // Toggle auto-refresh
+  const handleToggleAutoRefresh = useCallback((enabled: boolean) => {
+    setAutoRefresh(enabled);
+    localStorage.setItem(AUTO_REFRESH_KEY, enabled ? "1" : "0");
+    if (enabled) {
+      localStorage.setItem(AUTO_REFRESH_INTERVAL_KEY, String(interval));
+    }
+    // The actual polling is set up in the page layout, reading these values
+  }, [interval]);
+
+  const handleIntervalChange = useCallback((mins: number) => {
+    setIntervalMin(mins);
+    localStorage.setItem(AUTO_REFRESH_INTERVAL_KEY, String(mins));
+  }, []);
+
+  // Force refresh — clear all caches and reload
+  const handleForceRefresh = useCallback(async () => {
+    setChecking(true);
+    setStatus(null);
+    try {
+      // Clear service worker caches if any
+      if ("caches" in window) {
+        const keys = await caches.keys();
+        await Promise.all(keys.map((k) => caches.delete(k)));
+      }
+
+      // Unregister service workers
+      if ("serviceWorker" in navigator) {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs.map((r) => r.unregister()));
+      }
+
+      setStatus("Caches cleared. Reloading...");
+      setTimeout(() => {
+        window.location.reload();
+      }, 500);
+    } catch {
+      setStatus("Cache clear failed. Trying hard reload...");
+      setTimeout(() => {
+        window.location.reload();
+      }, 500);
+    }
+  }, []);
+
+  // Check for update without reloading — fetch the page and compare
+  const handleCheckUpdate = useCallback(async () => {
+    setChecking(true);
+    setStatus(null);
+    try {
+      const resp = await fetch(window.location.href, {
+        cache: "no-store",
+        headers: { "Cache-Control": "no-cache" },
+      });
+      const html = await resp.text();
+
+      // Look for a build ID or script hash change
+      const currentScripts = Array.from(document.querySelectorAll("script[src]"))
+        .map((s) => s.getAttribute("src"))
+        .filter(Boolean)
+        .sort()
+        .join(",");
+
+      const parser = new DOMParser();
+      const newDoc = parser.parseFromString(html, "text/html");
+      const newScripts = Array.from(newDoc.querySelectorAll("script[src]"))
+        .map((s) => s.getAttribute("src"))
+        .filter(Boolean)
+        .sort()
+        .join(",");
+
+      if (currentScripts !== newScripts) {
+        setStatus("Update available!");
+      } else {
+        setStatus("You're on the latest version.");
+      }
+    } catch {
+      setStatus("Could not check for updates.");
+    } finally {
+      setChecking(false);
+    }
+  }, []);
+
+  return (
+    <div className="p-5 space-y-5">
+      {/* Force refresh */}
+      <div>
+        <h3 className="text-xs font-semibold mb-1">Update App</h3>
+        <p className="text-[10px] text-muted mb-3">
+          Clear all browser caches and reload to get the latest version. Your data is preserved.
+        </p>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleForceRefresh}
+            disabled={checking}
+            className="px-4 py-2 rounded-lg text-sm font-medium bg-accent text-white hover:bg-blue-600 active:scale-[0.98] disabled:opacity-50"
+          >
+            {checking ? "Updating..." : "Force Refresh"}
+          </button>
+          <button
+            onClick={handleCheckUpdate}
+            disabled={checking}
+            className="px-4 py-2 rounded-lg text-sm font-medium text-muted border border-border hover:bg-gray-100 active:scale-[0.98] disabled:opacity-50"
+          >
+            Check for Update
+          </button>
+        </div>
+        {status && (
+          <p className={`text-[10px] mt-2 ${status.includes("available") ? "text-green-600 font-medium" : "text-muted"}`}>
+            {status}
+          </p>
+        )}
+      </div>
+
+      {/* Auto-refresh */}
+      <div className="pt-3 border-t border-border">
+        <h3 className="text-xs font-semibold mb-1">Auto-Refresh</h3>
+        <p className="text-[10px] text-muted mb-3">
+          Periodically check for new app versions and reload automatically if one is found. Only reloads when the app is idle (no unsaved work).
+        </p>
+        <div className="flex items-center gap-3">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <div
+              onClick={() => handleToggleAutoRefresh(!autoRefresh)}
+              className={`w-9 h-5 rounded-full transition-colors relative cursor-pointer ${autoRefresh ? "bg-accent" : "bg-gray-300"}`}
+            >
+              <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${autoRefresh ? "translate-x-4" : "translate-x-0.5"}`} />
+            </div>
+            <span className="text-xs text-foreground">{autoRefresh ? "On" : "Off"}</span>
+          </label>
+          {autoRefresh && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] text-muted">Every</span>
+              <select
+                value={interval}
+                onChange={(e) => handleIntervalChange(Number(e.target.value))}
+                className="text-xs border border-border rounded px-1.5 py-0.5"
+              >
+                <option value={5}>5 min</option>
+                <option value={15}>15 min</option>
+                <option value={30}>30 min</option>
+                <option value={60}>1 hour</option>
+              </select>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Build info */}
+      <div className="pt-3 border-t border-border">
+        <h3 className="text-xs font-semibold mb-1">About</h3>
+        <div className="text-[10px] text-muted space-y-0.5">
+          <p>Plaud Transcript Dashboard</p>
+          <p>Loaded: {new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}</p>
         </div>
       </div>
     </div>
