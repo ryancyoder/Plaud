@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useRef, useEffect, useMemo } from "react";
+import React, { useRef, useEffect, useMemo, useCallback } from "react";
 import { AppEvent, EventType } from "@/lib/types";
 import { isToday, isPast } from "@/lib/utils";
 
@@ -89,6 +89,17 @@ export default function WeekNav({ selectedDate, onSelectDate, getRecordingsForDa
 
   const allDates = useMemo(() => generateDateRange(), []);
 
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+    e.preventDefault();
+    const idx = allDates.indexOf(selectedDate);
+    if (idx === -1) return;
+    const next = e.key === "ArrowUp" ? idx - 1 : idx + 1;
+    if (next >= 0 && next < allDates.length) {
+      onSelectDate(allDates[next]);
+    }
+  }, [allDates, selectedDate, onSelectDate]);
+
   useEffect(() => {
     if (selectedRef.current && scrollRef.current) {
       const container = scrollRef.current;
@@ -102,7 +113,7 @@ export default function WeekNav({ selectedDate, onSelectDate, getRecordingsForDa
   }, [selectedDate]);
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full" tabIndex={0} onKeyDown={handleKeyDown} style={{ outline: "none" }}>
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-2 py-2 space-y-0">
         {allDates.map((date) => {
           const events = getRecordingsForDate(date);
