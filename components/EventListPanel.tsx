@@ -265,7 +265,7 @@ function DayCalendarView({ events, selectedEventId, onSelectEvent, onUpdateEvent
       ref={containerRef}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
-      style={{ touchAction: dragState ? "none" : "auto", userSelect: dragState ? "none" : "auto" }}
+      style={{ userSelect: dragState ? "none" : "auto" }}
     >
       <div className="relative" style={{ height: TOTAL_HOURS * HOUR_HEIGHT }}>
         {/* Hour lines and labels */}
@@ -317,7 +317,7 @@ function DayCalendarView({ events, selectedEventId, onSelectEvent, onUpdateEvent
               {/* Move handle (body) */}
               <div
                 className={`px-2 py-1 ${onUpdateEvent ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"}`}
-                style={{ height: Math.max(height - 8, 12) }}
+                style={{ height: Math.max(height - 8, 12), touchAction: onUpdateEvent ? "none" : "auto" }}
                 onClick={() => {
                   if (!dragState) onSelectEvent(isSelected ? null : event.id);
                 }}
@@ -335,6 +335,7 @@ function DayCalendarView({ events, selectedEventId, onSelectEvent, onUpdateEvent
               {onUpdateEvent && (
                 <div
                   className="absolute bottom-0 left-0 right-0 h-2 cursor-s-resize flex items-center justify-center"
+                  style={{ touchAction: "none" }}
                   onPointerDown={(e) => handlePointerDown(e, event.id, "resize", start, durationHrs)}
                 >
                   <div className="w-8 h-[3px] rounded-full bg-current opacity-30" />
