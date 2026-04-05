@@ -36,7 +36,8 @@ export interface PhotoMetadata {
 
 /**
  * Extract timestamp and GPS from a photo file.
- * Supports JPEG (direct EXIF) and HEIC/HEIF (EXIF embedded in ISOBMFF).
+ * Supports JPEG (direct EXIF), HEIC/HEIF (EXIF embedded in ISOBMFF),
+ * and PNG (tIME/tEXt chunks). Also parses dates from screenshot filenames.
  * Falls back to file.lastModified for timestamp.
  */
 export async function getPhotoMetadata(file: File): Promise<PhotoMetadata> {
@@ -51,7 +52,105 @@ export async function getPhotoMetadata(file: File): Promise<PhotoMetadata> {
   } catch {
     // fall through
   }
+
+  // PNG date extraction (tIME / tEXt chunks)
+  if (file.type === "image/png" || file.name.toLowerCase().endsWith(".png")) {
+    try {
+      const buffer = await file.slice(0, 256 * 1024).arrayBuffer();
+      const pngDate = parsePngDate(buffer);
+      if (pngDate) return { timestamp: pngDate, gps: null };
+    } catch {
+      // fall through
+    }
+  }
+
+  // Try extracting date from filename (screenshots often encode the date)
+  const filenameDate = parseDateFromFilename(file.name);
+  if (filenameDate) return { timestamp: filenameDate, gps: null };
+
   return { timestamp: new Date(file.lastModified), gps: null };
+}
+
+/**
+ * Extract creation date from PNG tIME chunk or tEXt chunks.
+ */
+function parsePngDate(buffer: ArrayBuffer): Date | null {
+  const bytes = new Uint8Array(buffer);
+  const view = new DataView(buffer);
+
+  // Check PNG signature
+  if (bytes.length < 16 || bytes[0] !== 0x89 || bytes[1] !== 0x50 ||
+      bytes[2] !== 0x4E || bytes[3] !== 0x47) return null;
+
+  let offset = 8; // skip PNG signature
+  while (offset + 12 < bytes.length) {
+    const chunkLen = view.getUint32(offset);
+    const chunkType = String.fromCharCode(bytes[offset + 4], bytes[offset + 5], bytes[offset + 6], bytes[offset + 7]);
+
+    if (chunkType === "tIME" && chunkLen === 7) {
+      const dataStart = offset + 8;
+      if (dataStart + 7 <= bytes.length) {
+        const year = view.getUint16(dataStart);
+        const month = bytes[dataStart + 2];
+        const day = bytes[dataStart + 3];
+        const hour = bytes[dataStart + 4];
+        const minute = bytes[dataStart + 5];
+        const second = bytes[dataStart + 6];
+        const d = new Date(year, month - 1, day, hour, minute, second);
+        if (!isNaN(d.getTime())) return d;
+      }
+    }
+
+    if (chunkType === "tEXt" && chunkLen > 0 && chunkLen < 10000) {
+      const dataStart = offset + 8;
+      const dataEnd = dataStart + chunkLen;
+      if (dataEnd <= bytes.length) {
+        let nullPos = dataStart;
+        while (nullPos < dataEnd && bytes[nullPos] !== 0) nullPos++;
+        const keyword = String.fromCharCode(...bytes.slice(dataStart, nullPos));
+        if ((keyword === "Creation Time" || keyword === "create-date" || keyword === "date:create") && nullPos + 1 < dataEnd) {
+          const value = String.fromCharCode(...bytes.slice(nullPos + 1, dataEnd));
+          const d = new Date(value.trim());
+          if (!isNaN(d.getTime())) return d;
+        }
+      }
+    }
+
+    if (chunkType === "IDAT" || chunkType === "IEND") break;
+    offset += 12 + chunkLen;
+  }
+  return null;
+}
+
+/**
+ * Extract date from screenshot filenames like:
+ *   "Screenshot 2025-04-03 at 10.30.22 AM.png"
+ *   "Screenshot_20250403-103022.png"
+ *   "IMG_20250403_103022.jpg"
+ */
+function parseDateFromFilename(name: string): Date | null {
+  // Pattern: YYYY-MM-DD at HH.MM.SS (AM/PM)
+  const m1 = name.match(/(\d{4})-(\d{2})-(\d{2})\s+at\s+(\d{1,2})\.(\d{2})\.(\d{2})\s*(AM|PM)?/i);
+  if (m1) {
+    let hour = parseInt(m1[4]);
+    if (m1[7]?.toUpperCase() === "PM" && hour < 12) hour += 12;
+    if (m1[7]?.toUpperCase() === "AM" && hour === 12) hour = 0;
+    const d = new Date(+m1[1], +m1[2] - 1, +m1[3], hour, +m1[5], +m1[6]);
+    if (!isNaN(d.getTime())) return d;
+  }
+  // Pattern: YYYYMMDD-HHMMSS or YYYYMMDD_HHMMSS
+  const m2 = name.match(/(\d{4})(\d{2})(\d{2})[-_](\d{2})(\d{2})(\d{2})/);
+  if (m2) {
+    const d = new Date(+m2[1], +m2[2] - 1, +m2[3], +m2[4], +m2[5], +m2[6]);
+    if (!isNaN(d.getTime())) return d;
+  }
+  // Pattern: YYYY-MM-DD_HH-MM-SS
+  const m3 = name.match(/(\d{4})-(\d{2})-(\d{2})[_\s](\d{2})-(\d{2})-(\d{2})/);
+  if (m3) {
+    const d = new Date(+m3[1], +m3[2] - 1, +m3[3], +m3[4], +m3[5], +m3[6]);
+    if (!isNaN(d.getTime())) return d;
+  }
+  return null;
 }
 
 // --- EXIF Parser ---
