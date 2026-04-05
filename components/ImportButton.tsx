@@ -1184,34 +1184,35 @@ export default function ImportButton({
                               {/* Event card */}
                               <div className={`flex-1 rounded-lg border p-2.5 ${isUnmatched ? "border-amber-300 bg-amber-50" : "border-blue-200 bg-blue-50"}`}>
                                 <div className="flex items-center justify-between mb-1 gap-2">
-                                  {isUnmatched ? (
-                                    <input
-                                      type="text"
-                                      value={currentLabel}
-                                      onChange={(e) => {
-                                        const val = e.target.value;
-                                        setEditedEventLabels(prev => ({ ...prev, [ev.id]: val }));
-                                      }}
-                                      onBlur={() => {
-                                        const val = editedEventLabels[ev.id];
-                                        if (val !== undefined && val !== ev.label) {
-                                          updateEvent(ev.id, { label: val });
-                                          ev.label = val;
-                                        }
-                                      }}
-                                      onKeyDown={(e) => {
-                                        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-                                      }}
-                                      className="flex-1 text-sm font-semibold text-amber-800 bg-white border border-amber-300 rounded px-2 py-0.5 focus:outline-none focus:ring-2 focus:ring-amber-400"
-                                      placeholder="Name this event..."
-                                    />
-                                  ) : (
-                                    <span className="text-sm font-semibold text-blue-800">{currentLabel}</span>
-                                  )}
+                                  <input
+                                    type="text"
+                                    value={currentLabel}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      setEditedEventLabels(prev => ({ ...prev, [ev.id]: val }));
+                                    }}
+                                    onBlur={() => {
+                                      const val = editedEventLabels[ev.id];
+                                      if (val !== undefined && val !== ev.label) {
+                                        updateEvent(ev.id, { label: val });
+                                        ev.label = val;
+                                        onUpdateEventProp?.(ev.id, { label: val });
+                                      }
+                                    }}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                                    }}
+                                    className={`flex-1 text-sm font-semibold rounded px-2 py-0.5 focus:outline-none focus:ring-2 ${
+                                      isUnmatched
+                                        ? "text-amber-800 bg-white border border-amber-300 focus:ring-amber-400"
+                                        : "text-blue-800 bg-white/60 border border-blue-200 focus:ring-blue-400"
+                                    }`}
+                                    placeholder="Name this event..."
+                                  />
                                   <span className="text-xs text-blue-600 shrink-0">{ev.date} {ev.startTime || ""}</span>
                                 </div>
                                 {isUnmatched && (
-                                  <p className="text-[10px] text-amber-600 mb-1.5">No matching client or event — tap to rename, or merge with adjacent event</p>
+                                  <p className="text-[10px] text-amber-600 mb-1.5">No matching client or event — rename or merge with adjacent event</p>
                                 )}
                                 {/* GPS / Location info */}
                                 {seg?.gps ? (
@@ -1233,10 +1234,29 @@ export default function ImportButton({
                                   </div>
                                 )}
                                 {assignedClient && (
-                                  <div className="mb-1.5">
+                                  <div className="mb-1.5 flex items-center gap-1.5">
                                     <span className="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full">
                                       Assigned to {assignedClient.name}
                                     </span>
+                                    <button
+                                      onClick={() => {
+                                        updateEvent(ev.id, { clientId: undefined });
+                                        onUpdateEventProp?.(ev.id, { clientId: undefined });
+                                        setPhotoResults((prev) => {
+                                          if (!prev) return prev;
+                                          return {
+                                            ...prev,
+                                            createdEvents: prev.createdEvents.map((e) =>
+                                              e.id === ev.id ? { ...e, clientId: undefined } : e
+                                            ),
+                                          };
+                                        });
+                                      }}
+                                      className="text-[10px] text-red-500 hover:text-red-700 hover:bg-red-50 rounded px-1 py-0.5"
+                                      title="Remove assignment"
+                                    >
+                                      &times;
+                                    </button>
                                   </div>
                                 )}
                                 <div className="flex gap-1.5 overflow-x-auto">
