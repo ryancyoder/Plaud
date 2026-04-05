@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState, useEffect, useCallback } from "react";
-import { importParsedSegments, importFromText, addEvent } from "@/lib/event-store";
+import { importParsedSegments, importFromText, addEvent, updateEvent } from "@/lib/event-store";
 import { srtToSegments, ParsedTranscript } from "@/lib/srt-parser";
 import { AppEvent, Attachment, Client } from "@/lib/types";
 import { batchMatchPhotos, PhotoMatchResult, PhotoSegment, GpsCoords, reverseGeocode, findClosestClient, findClientByAddress } from "@/lib/photo-matcher";
@@ -79,6 +79,7 @@ export default function ImportButton({
   const [pendingImageFiles, setPendingImageFiles] = useState<FileList | null>(null);
   const [photoThumbnails, setPhotoThumbnails] = useState<{ file: File; url: string }[]>([]);
   const [excludedPhotos, setExcludedPhotos] = useState<Set<number>>(new Set());
+  const [editedEventLabels, setEditedEventLabels] = useState<Record<string, string>>({});
   const [fallbackLocation, setFallbackLocation] = useState<GpsCoords | null>(null);
   const [locationStatus, setLocationStatus] = useState<"idle" | "loading" | "granted" | "denied">("idle");
 
@@ -360,6 +361,7 @@ export default function ImportButton({
     photoThumbnails.forEach(t => URL.revokeObjectURL(t.url));
     setPhotoThumbnails([]);
     setExcludedPhotos(new Set());
+    setEditedEventLabels({});
     setPhotoStep("closed");
     setPhotoError(null);
     setPhotoResults(null);
@@ -966,18 +968,46 @@ export default function ImportButton({
 
                   {photoResults.createdEvents.length > 0 && (
                     <div>
-                      <h3 className="text-[10px] font-semibold uppercase text-muted mb-2">Photo Events Created</h3>
-                      <p className="text-[10px] text-gray-400 mb-2">Grouped by time and location, added to calendar</p>
+                      <h3 className="text-xs font-semibold uppercase text-muted mb-2">Photo Events Created</h3>
+                      <p className="text-xs text-gray-400 mb-2">Grouped by time and location, added to calendar</p>
                       <div className="space-y-2">
                         {photoResults.createdEvents.map((ev, idx) => {
                           const seg = photoResults.segments[idx];
                           const assignedClient = ev.clientId ? clients.find((c) => c.id === ev.clientId) : null;
+                          const isUnmatched = !ev.clientId && !photoResults.matched.some(m => m.eventId === ev.id);
+                          const currentLabel = editedEventLabels[ev.id] ?? ev.label;
                           return (
-                            <div key={ev.id} className="rounded-lg border border-blue-200 bg-blue-50 p-2.5">
-                              <div className="flex items-center justify-between mb-1">
-                                <span className="text-xs font-semibold text-blue-800">{ev.label}</span>
-                                <span className="text-[10px] text-blue-600">{ev.date}</span>
+                            <div key={ev.id} className={`rounded-lg border p-2.5 ${isUnmatched ? "border-amber-300 bg-amber-50" : "border-blue-200 bg-blue-50"}`}>
+                              <div className="flex items-center justify-between mb-1 gap-2">
+                                {isUnmatched ? (
+                                  <input
+                                    type="text"
+                                    value={currentLabel}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      setEditedEventLabels(prev => ({ ...prev, [ev.id]: val }));
+                                    }}
+                                    onBlur={() => {
+                                      const val = editedEventLabels[ev.id];
+                                      if (val !== undefined && val !== ev.label) {
+                                        updateEvent(ev.id, { label: val });
+                                        ev.label = val;
+                                      }
+                                    }}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                                    }}
+                                    className="flex-1 text-sm font-semibold text-amber-800 bg-white border border-amber-300 rounded px-2 py-0.5 focus:outline-none focus:ring-2 focus:ring-amber-400"
+                                    placeholder="Name this event..."
+                                  />
+                                ) : (
+                                  <span className="text-sm font-semibold text-blue-800">{currentLabel}</span>
+                                )}
+                                <span className="text-xs text-blue-600 shrink-0">{ev.date}</span>
                               </div>
+                              {isUnmatched && (
+                                <p className="text-[10px] text-amber-600 mb-1.5">No matching client or event — tap to rename</p>
+                              )}
                               {/* GPS / Location info */}
                               {seg?.gps ? (
                                 <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
@@ -1006,7 +1036,7 @@ export default function ImportButton({
                               )}
                               <div className="flex gap-1.5 overflow-x-auto">
                                 {ev.attachments?.map((att) => (
-                                  <div key={att.id} className="shrink-0 w-12 h-12 rounded overflow-hidden border border-blue-200">
+                                  <div key={att.id} className="shrink-0 w-14 h-14 rounded overflow-hidden border border-blue-200">
                                     <img src={att.dataUrl} alt={att.name} className="w-full h-full object-cover" />
                                   </div>
                                 ))}
