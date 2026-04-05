@@ -474,6 +474,7 @@ export default function Dashboard() {
             selectedEventId={selectedEventId}
             onSelectEvent={setSelectedEventId}
             onDeleteEvent={handleDeleteEvent}
+            onUpdateEvent={handleUpdateEvent}
           />
         </div>
 

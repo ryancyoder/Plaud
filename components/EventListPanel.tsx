@@ -12,23 +12,25 @@ interface EventListPanelProps {
   selectedEventId: string | null;
   onSelectEvent: (eventId: string | null) => void;
   onDeleteEvent?: (eventId: string) => void;
+  onUpdateEvent?: (eventId: string, updates: Partial<AppEvent>) => void;
 }
 
-export default function EventListPanel({ mode, date, client, events, selectedEventId, onSelectEvent, onDeleteEvent }: EventListPanelProps) {
+export default function EventListPanel({ mode, date, client, events, selectedEventId, onSelectEvent, onDeleteEvent, onUpdateEvent }: EventListPanelProps) {
   if (mode === "client" && client) {
     return <ClientEventList client={client} events={events} selectedEventId={selectedEventId} onSelectEvent={onSelectEvent} onDeleteEvent={onDeleteEvent} />;
   }
 
-  return <DateEventList date={date || ""} events={events} selectedEventId={selectedEventId} onSelectEvent={onSelectEvent} onDeleteEvent={onDeleteEvent} />;
+  return <DateEventList date={date || ""} events={events} selectedEventId={selectedEventId} onSelectEvent={onSelectEvent} onDeleteEvent={onDeleteEvent} onUpdateEvent={onUpdateEvent} />;
 }
 
 // --- Date Mode ---
 
 type DayViewMode = "list" | "calendar";
 
-function DateEventList({ date, events, selectedEventId, onSelectEvent, onDeleteEvent }: {
+function DateEventList({ date, events, selectedEventId, onSelectEvent, onDeleteEvent, onUpdateEvent }: {
   date: string; events: AppEvent[]; selectedEventId: string | null;
   onSelectEvent: (eventId: string | null) => void; onDeleteEvent?: (eventId: string) => void;
+  onUpdateEvent?: (eventId: string, updates: Partial<AppEvent>) => void;
 }) {
   const [viewMode, setViewMode] = useState<DayViewMode>("list");
   const today = isToday(date);
@@ -107,6 +109,7 @@ function DateEventList({ date, events, selectedEventId, onSelectEvent, onDeleteE
           events={sorted}
           selectedEventId={selectedEventId}
           onSelectEvent={onSelectEvent}
+          onUpdateEvent={onUpdateEvent}
         />
       )}
     </div>
@@ -141,38 +144,129 @@ function parseTime(t: string): number {
   return h + (m || 0) / 60;
 }
 
-function DayCalendarView({ events, selectedEventId, onSelectEvent }: {
+function hoursToTimeStr(h: number): string {
+  const clamped = Math.max(0, Math.min(23.99, h));
+  const hrs = Math.floor(clamped);
+  const mins = Math.round((clamped - hrs) * 60);
+  return `${String(hrs).padStart(2, "0")}:${String(mins).padStart(2, "0")}`;
+}
+
+// Snap to 5-minute increments
+function snapHours(h: number): number {
+  return Math.round(h * 12) / 12; // 12 = 60/5
+}
+
+function DayCalendarView({ events, selectedEventId, onSelectEvent, onUpdateEvent }: {
   events: AppEvent[];
   selectedEventId: string | null;
   onSelectEvent: (eventId: string | null) => void;
+  onUpdateEvent?: (eventId: string, updates: Partial<AppEvent>) => void;
 }) {
-  // Current time indicator
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [dragState, setDragState] = useState<{
+    eventId: string;
+    mode: "move" | "resize";
+    startY: number;
+    origHour: number;
+    origDuration: number; // in hours
+  } | null>(null);
+  const [dragPreview, setDragPreview] = useState<{ top: number; height: number } | null>(null);
+  const dragRef = useRef(dragState);
+  dragRef.current = dragState;
+
   const now = new Date();
   const currentHour = now.getHours() + now.getMinutes() / 60;
   const showNowLine = currentHour >= CAL_START_HOUR && currentHour <= CAL_END_HOUR;
 
-  // Position events that have start times
   const positioned = useMemo(() => {
     return events
       .filter((ev) => ev.startTime)
       .map((ev) => {
         const start = parseTime(ev.startTime!);
-        const duration = ev.duration ? ev.duration / 60 : 0.5; // default 30min if no duration
+        const duration = ev.duration ? ev.duration / 60 : 0.5;
         const top = (start - CAL_START_HOUR) * HOUR_HEIGHT;
-        const height = Math.max(duration * HOUR_HEIGHT, 20); // min 20px
-        return { event: ev, top, height, start };
+        const height = Math.max(duration * HOUR_HEIGHT, 20);
+        return { event: ev, top, height, start, durationHrs: duration };
       })
       .filter((p) => p.start >= CAL_START_HOUR - 0.5 && p.start <= CAL_END_HOUR);
   }, [events]);
 
-  // Events without start times
   const unpositioned = useMemo(
     () => events.filter((ev) => !ev.startTime),
     [events]
   );
 
+  const handlePointerDown = useCallback((e: React.PointerEvent, eventId: string, mode: "move" | "resize", origHour: number, origDuration: number) => {
+    if (!onUpdateEvent) return;
+    e.preventDefault();
+    e.stopPropagation();
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    const state = { eventId, mode, startY: e.clientY, origHour, origDuration };
+    setDragState(state);
+    dragRef.current = state;
+    // Set initial preview
+    const top = (origHour - CAL_START_HOUR) * HOUR_HEIGHT;
+    const height = Math.max(origDuration * HOUR_HEIGHT, 20);
+    setDragPreview({ top, height });
+  }, [onUpdateEvent]);
+
+  const handlePointerMove = useCallback((e: React.PointerEvent) => {
+    const ds = dragRef.current;
+    if (!ds) return;
+    e.preventDefault();
+    const deltaY = e.clientY - ds.startY;
+    const deltaHours = deltaY / HOUR_HEIGHT;
+
+    if (ds.mode === "move") {
+      const newHour = snapHours(ds.origHour + deltaHours);
+      const clamped = Math.max(CAL_START_HOUR, Math.min(CAL_END_HOUR - ds.origDuration, newHour));
+      const top = (clamped - CAL_START_HOUR) * HOUR_HEIGHT;
+      const height = Math.max(ds.origDuration * HOUR_HEIGHT, 20);
+      setDragPreview({ top, height });
+    } else {
+      const newDuration = snapHours(ds.origDuration + deltaHours);
+      const clamped = Math.max(5 / 60, Math.min(CAL_END_HOUR - ds.origHour, newDuration));
+      const top = (ds.origHour - CAL_START_HOUR) * HOUR_HEIGHT;
+      const height = Math.max(clamped * HOUR_HEIGHT, 20);
+      setDragPreview({ top, height });
+    }
+  }, []);
+
+  const handlePointerUp = useCallback((e: React.PointerEvent) => {
+    const ds = dragRef.current;
+    if (!ds || !onUpdateEvent) {
+      setDragState(null);
+      setDragPreview(null);
+      return;
+    }
+    const deltaY = e.clientY - ds.startY;
+    const deltaHours = deltaY / HOUR_HEIGHT;
+
+    if (ds.mode === "move") {
+      const newHour = snapHours(ds.origHour + deltaHours);
+      const clamped = Math.max(CAL_START_HOUR, Math.min(CAL_END_HOUR - ds.origDuration, newHour));
+      onUpdateEvent(ds.eventId, {
+        startTime: hoursToTimeStr(clamped),
+      });
+    } else {
+      const newDuration = snapHours(ds.origDuration + deltaHours);
+      const clamped = Math.max(5 / 60, Math.min(CAL_END_HOUR - ds.origHour, newDuration));
+      onUpdateEvent(ds.eventId, {
+        duration: Math.round(clamped * 60),
+      });
+    }
+    setDragState(null);
+    setDragPreview(null);
+  }, [onUpdateEvent]);
+
   return (
-    <div className="flex-1 overflow-y-auto relative">
+    <div
+      className="flex-1 overflow-y-auto relative"
+      ref={containerRef}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      style={{ touchAction: dragState ? "none" : "auto" }}
+    >
       <div className="relative" style={{ height: TOTAL_HOURS * HOUR_HEIGHT }}>
         {/* Hour lines and labels */}
         {Array.from({ length: TOTAL_HOURS + 1 }, (_, i) => {
@@ -191,7 +285,7 @@ function DayCalendarView({ events, selectedEventId, onSelectEvent }: {
         {/* Now indicator */}
         {showNowLine && (
           <div
-            className="absolute left-10 right-0 z-10 flex items-center"
+            className="absolute left-10 right-0 z-10 flex items-center pointer-events-none"
             style={{ top: (currentHour - CAL_START_HOUR) * HOUR_HEIGHT }}
           >
             <div className="w-2 h-2 rounded-full bg-red-500 -ml-1" />
@@ -199,26 +293,54 @@ function DayCalendarView({ events, selectedEventId, onSelectEvent }: {
           </div>
         )}
 
+        {/* Drag preview ghost */}
+        {dragState && dragPreview && (
+          <div
+            className="absolute left-11 right-2 rounded-lg border-2 border-accent bg-accent/10 pointer-events-none z-30"
+            style={{ top: dragPreview.top, height: dragPreview.height }}
+          />
+        )}
+
         {/* Positioned events */}
-        {positioned.map(({ event, top, height }) => {
+        {positioned.map(({ event, top, height, start, durationHrs }) => {
           const isSelected = selectedEventId === event.id;
+          const isDragging = dragState?.eventId === event.id;
           const colorClass = EVENT_TYPE_COLORS[event.type] || "bg-gray-100 border-gray-300 text-gray-700";
           return (
-            <button
+            <div
               key={event.id}
-              onClick={() => onSelectEvent(isSelected ? null : event.id)}
-              className={`absolute left-11 right-2 rounded-lg border px-2 py-1 text-left overflow-hidden transition-shadow ${colorClass} ${
-                isSelected ? "ring-2 ring-accent shadow-md z-20" : "hover:shadow-sm z-10"
+              className={`absolute left-11 right-2 rounded-lg border text-left overflow-hidden transition-shadow select-none ${colorClass} ${
+                isDragging ? "opacity-40 z-5" : isSelected ? "ring-2 ring-accent shadow-md z-20" : "hover:shadow-sm z-10"
               }`}
               style={{ top, height: Math.max(height, 20), minHeight: 20 }}
             >
-              <div className="text-[10px] font-semibold truncate leading-tight">{event.label}</div>
-              {height >= 32 && (
-                <div className="text-[9px] opacity-70 truncate">
-                  {event.startTime}{event.duration ? ` · ${formatDuration(event.duration)}` : ""}
+              {/* Move handle (body) */}
+              <div
+                className={`px-2 py-1 ${onUpdateEvent ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"}`}
+                style={{ height: Math.max(height - 8, 12) }}
+                onClick={() => {
+                  if (!dragState) onSelectEvent(isSelected ? null : event.id);
+                }}
+                onPointerDown={(e) => handlePointerDown(e, event.id, "move", start, durationHrs)}
+              >
+                <div className="text-[10px] font-semibold truncate leading-tight">{event.label}</div>
+                {height >= 32 && (
+                  <div className="text-[9px] opacity-70 truncate">
+                    {event.startTime}{event.duration ? ` · ${formatDuration(event.duration)}` : ""}
+                  </div>
+                )}
+              </div>
+
+              {/* Resize handle (bottom edge) */}
+              {onUpdateEvent && (
+                <div
+                  className="absolute bottom-0 left-0 right-0 h-2 cursor-s-resize flex items-center justify-center"
+                  onPointerDown={(e) => handlePointerDown(e, event.id, "resize", start, durationHrs)}
+                >
+                  <div className="w-8 h-[3px] rounded-full bg-current opacity-30" />
                 </div>
               )}
-            </button>
+            </div>
           );
         })}
       </div>
