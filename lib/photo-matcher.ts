@@ -41,8 +41,18 @@ export interface PhotoMetadata {
  * Falls back to file.lastModified for timestamp.
  */
 export async function getPhotoMetadata(file: File): Promise<PhotoMetadata> {
+  // Read a shared buffer once for all extraction strategies
+  const scanSize = 512 * 1024;
+  let sharedBuffer: ArrayBuffer | null = null;
+  async function getBuffer(): Promise<ArrayBuffer> {
+    if (!sharedBuffer) sharedBuffer = await file.slice(0, scanSize).arrayBuffer();
+    return sharedBuffer;
+  }
+
+  // Strategy 1: EXIF (JPEG, HEIC, or any format with embedded EXIF)
   try {
-    const exif = await readExifData(file);
+    const buffer = await getBuffer();
+    const exif = parseTiffFromBuffer(buffer);
     if (exif.date || exif.gps) {
       return {
         timestamp: exif.date || new Date(file.lastModified),
@@ -53,10 +63,10 @@ export async function getPhotoMetadata(file: File): Promise<PhotoMetadata> {
     // fall through
   }
 
-  // PNG date extraction (tIME / tEXt chunks)
+  // Strategy 2: PNG chunk metadata (tIME / tEXt / iTXt)
   if (file.type === "image/png" || file.name.toLowerCase().endsWith(".png")) {
     try {
-      const buffer = await file.slice(0, 256 * 1024).arrayBuffer();
+      const buffer = await getBuffer();
       const pngDate = parsePngDate(buffer);
       if (pngDate) return { timestamp: pngDate, gps: null };
     } catch {
@@ -64,7 +74,16 @@ export async function getPhotoMetadata(file: File): Promise<PhotoMetadata> {
     }
   }
 
-  // Try extracting date from filename (screenshots often encode the date)
+  // Strategy 3: XMP metadata (embedded XML with date fields — common in iOS annotated images)
+  try {
+    const buffer = await getBuffer();
+    const xmpDate = parseXmpDate(buffer);
+    if (xmpDate) return { timestamp: xmpDate, gps: null };
+  } catch {
+    // fall through
+  }
+
+  // Strategy 4: Date encoded in filename (screenshots)
   const filenameDate = parseDateFromFilename(file.name);
   if (filenameDate) return { timestamp: filenameDate, gps: null };
 
@@ -116,8 +135,128 @@ function parsePngDate(buffer: ArrayBuffer): Date | null {
       }
     }
 
+    // iTXt — international text (iOS uses this for metadata)
+    if (chunkType === "iTXt" && chunkLen > 0 && chunkLen < 50000) {
+      const dataStart = offset + 8;
+      const dataEnd = dataStart + chunkLen;
+      if (dataEnd <= bytes.length) {
+        // keyword\0 compressionFlag compressionMethod language\0 translatedKeyword\0 text
+        let nullPos = dataStart;
+        while (nullPos < dataEnd && bytes[nullPos] !== 0) nullPos++;
+        const keyword = String.fromCharCode(...bytes.slice(dataStart, nullPos));
+        if ((keyword === "Creation Time" || keyword === "create-date" || keyword === "date:create" || keyword === "XML:com.adobe.xmp") && nullPos + 3 < dataEnd) {
+          const compressionFlag = bytes[nullPos + 1];
+          // Skip language tag (null-terminated) and translated keyword (null-terminated)
+          let textStart = nullPos + 3; // skip null, compressionFlag, compressionMethod
+          // skip language\0
+          while (textStart < dataEnd && bytes[textStart] !== 0) textStart++;
+          textStart++; // skip null
+          // skip translated keyword\0
+          while (textStart < dataEnd && bytes[textStart] !== 0) textStart++;
+          textStart++; // skip null
+          if (compressionFlag === 0 && textStart < dataEnd) {
+            const textBytes = bytes.slice(textStart, dataEnd);
+            const value = new TextDecoder().decode(textBytes);
+            if (keyword === "XML:com.adobe.xmp") {
+              const xmpDate = extractDateFromXmpString(value);
+              if (xmpDate) return xmpDate;
+            } else {
+              const d = new Date(value.trim());
+              if (!isNaN(d.getTime())) return d;
+            }
+          }
+        }
+      }
+    }
+
     if (chunkType === "IDAT" || chunkType === "IEND") break;
     offset += 12 + chunkLen;
+  }
+  return null;
+}
+
+/**
+ * Extract a date from XMP (XML) metadata embedded anywhere in the file.
+ * Looks for common date tags: xmp:CreateDate, photoshop:DateCreated,
+ * exif:DateTimeOriginal, tiff:DateTime, xmp:ModifyDate.
+ */
+function parseXmpDate(buffer: ArrayBuffer): Date | null {
+  const bytes = new Uint8Array(buffer);
+
+  // Find XMP packet: look for "<x:xmpmeta" or "xmp:CreateDate" markers
+  // XMP is UTF-8 XML so we can scan for ASCII patterns
+  const text = scanForXmpBlock(bytes);
+  if (!text) return null;
+
+  return extractDateFromXmpString(text);
+}
+
+function scanForXmpBlock(bytes: Uint8Array): string | null {
+  // Look for "<x:xmpmeta" start marker
+  const startMarker = [0x3C, 0x78, 0x3A, 0x78, 0x6D, 0x70, 0x6D, 0x65, 0x74, 0x61]; // <x:xmpmeta
+  const endMarker = [0x3C, 0x2F, 0x78, 0x3A, 0x78, 0x6D, 0x70, 0x6D, 0x65, 0x74, 0x61, 0x3E]; // </x:xmpmeta>
+
+  let startIdx = -1;
+  for (let i = 0; i < bytes.length - startMarker.length; i++) {
+    let match = true;
+    for (let j = 0; j < startMarker.length; j++) {
+      if (bytes[i + j] !== startMarker[j]) { match = false; break; }
+    }
+    if (match) { startIdx = i; break; }
+  }
+  if (startIdx === -1) return null;
+
+  let endIdx = -1;
+  for (let i = startIdx; i < bytes.length - endMarker.length; i++) {
+    let match = true;
+    for (let j = 0; j < endMarker.length; j++) {
+      if (bytes[i + j] !== endMarker[j]) { match = false; break; }
+    }
+    if (match) { endIdx = i + endMarker.length; break; }
+  }
+  if (endIdx === -1) return null;
+
+  return new TextDecoder().decode(bytes.slice(startIdx, endIdx));
+}
+
+function extractDateFromXmpString(xmp: string): Date | null {
+  // Try these XMP date tags in priority order
+  const tags = [
+    "exif:DateTimeOriginal",
+    "xmp:CreateDate",
+    "photoshop:DateCreated",
+    "tiff:DateTime",
+    "xmp:ModifyDate",
+  ];
+
+  for (const tag of tags) {
+    // Match <tag>value</tag> or tag="value"
+    const re1 = new RegExp(`<${tag}>([^<]+)</${tag}>`);
+    const m1 = xmp.match(re1);
+    if (m1) {
+      const d = parseXmpDateValue(m1[1].trim());
+      if (d) return d;
+    }
+    const re2 = new RegExp(`${tag}="([^"]+)"`);
+    const m2 = xmp.match(re2);
+    if (m2) {
+      const d = parseXmpDateValue(m2[1].trim());
+      if (d) return d;
+    }
+  }
+  return null;
+}
+
+function parseXmpDateValue(value: string): Date | null {
+  // XMP dates: "2025-04-03T10:30:22", "2025-04-03T10:30:22+05:00", "2025:04:03 10:30:22"
+  // Try ISO format first
+  const d1 = new Date(value);
+  if (!isNaN(d1.getTime()) && d1.getFullYear() > 1990) return d1;
+  // Try EXIF-style "YYYY:MM:DD HH:MM:SS"
+  const m = value.match(/(\d{4}):(\d{2}):(\d{2})\s+(\d{2}):(\d{2}):(\d{2})/);
+  if (m) {
+    const d = new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]);
+    if (!isNaN(d.getTime())) return d;
   }
   return null;
 }
@@ -161,14 +300,10 @@ interface ExifData {
 }
 
 /**
- * Unified EXIF reader. Works for JPEG, HEIC, and any format that
- * contains a TIFF-structured EXIF block. Uses brute-force scan for
- * the "Exif\0\0" + TIFF header pattern anywhere in the first 512KB.
- * This handles JPEG APP1, HEIC ISOBMFF, and edge cases like
- * multiple APP1 markers or non-standard containers.
+ * Parse TIFF/EXIF data from a pre-read buffer.
+ * Avoids redundant file reads when the caller already has the buffer.
  */
-async function readExifData(file: File): Promise<ExifData> {
-  const buffer = await file.slice(0, 512 * 1024).arrayBuffer();
+function parseTiffFromBuffer(buffer: ArrayBuffer): ExifData {
   const bytes = new Uint8Array(buffer);
   const fullView = new DataView(buffer);
 
