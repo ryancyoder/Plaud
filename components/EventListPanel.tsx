@@ -306,11 +306,10 @@ function DayCalendarView({ events, selectedEventId, onSelectEvent, onUpdateEvent
           const isSelected = selectedEventId === event.id;
           const isDragging = dragState?.eventId === event.id;
           const colorClass = EVENT_TYPE_COLORS[event.type] || "bg-gray-100 border-gray-300 text-gray-700";
-          const assignIndicator = event.clientId ? "border-l-green-500" : "border-l-red-400";
           return (
             <div
               key={event.id}
-              className={`absolute left-11 right-2 rounded-lg border border-l-[3px] text-left overflow-hidden transition-shadow select-none ${colorClass} ${assignIndicator} ${
+              className={`absolute left-11 right-2 rounded-lg border ${!event.clientId ? "border-l-[3px] border-l-red-400" : ""} text-left overflow-hidden transition-shadow select-none ${colorClass} ${
                 isDragging ? "opacity-40 z-5" : isSelected ? "ring-2 ring-accent shadow-md z-20" : "hover:shadow-sm z-10"
               }`}
               style={{ top, height: Math.max(height, 20), minHeight: 20 }}
@@ -354,12 +353,11 @@ function DayCalendarView({ events, selectedEventId, onSelectEvent, onUpdateEvent
           {unpositioned.map((ev) => {
             const isSelected = selectedEventId === ev.id;
             const colorClass = EVENT_TYPE_COLORS[ev.type] || "bg-gray-100 border-gray-300 text-gray-700";
-            const assignIndicator = ev.clientId ? "border-l-green-500" : "border-l-red-400";
             return (
               <button
                 key={ev.id}
                 onClick={() => onSelectEvent(isSelected ? null : ev.id)}
-                className={`w-full text-left rounded-lg border border-l-[3px] px-2 py-1.5 mb-1 text-[10px] font-semibold truncate ${colorClass} ${assignIndicator} ${
+                className={`w-full text-left rounded-lg border ${!ev.clientId ? "border-l-[3px] border-l-red-400" : ""} px-2 py-1.5 mb-1 text-[10px] font-semibold truncate ${colorClass} ${
                   isSelected ? "ring-2 ring-accent" : ""
                 }`}
               >
@@ -497,11 +495,11 @@ export function EventRow({ event, onSelect, onDelete, isSelected }: {
           onClick={() => { if (swiped) { setSwiped(false); setOffsetX(0); } else onSelect(event); }}
           className={`w-full text-left flex items-start gap-3 px-4 py-2.5 transition-colors ${isSelected ? "bg-accent-light" : "hover:bg-gray-50 active:bg-gray-100"}`}
         >
+          {!event.clientId && <div className="shrink-0 w-1 self-stretch rounded-full bg-red-400" />}
           <div className="shrink-0 w-14 pt-0.5">
             <div className="text-sm font-semibold tabular-nums">{event.startTime || ""}</div>
             <div className="text-[10px] text-muted">{event.duration ? formatDuration(event.duration) : ""}</div>
           </div>
-          <div className={`shrink-0 w-1 self-stretch rounded-full ${event.clientId ? "bg-green-500" : "bg-red-400"}`} />
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
               <h4 className="text-sm font-semibold truncate">
