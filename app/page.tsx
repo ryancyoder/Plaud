@@ -329,6 +329,12 @@ export default function Dashboard() {
           >
             Map
           </Link>
+          <Link
+            href="/calendar"
+            className="px-2.5 py-1 rounded-lg text-[10px] font-medium text-muted border border-border hover:bg-gray-50 active:scale-95"
+          >
+            Calendar
+          </Link>
         </div>
 
         <div className="flex items-center gap-2">

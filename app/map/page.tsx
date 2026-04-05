@@ -207,6 +207,9 @@ export default function MapPage() {
           <Link href="/actions" className="px-3 py-1.5 rounded-lg text-xs font-medium text-muted border border-border hover:bg-gray-50 active:scale-95">
             Actions
           </Link>
+          <Link href="/calendar" className="px-3 py-1.5 rounded-lg text-xs font-medium text-muted border border-border hover:bg-gray-50 active:scale-95">
+            Calendar
+          </Link>
           <span className="text-sm font-semibold">Client Map</span>
         </div>
 
