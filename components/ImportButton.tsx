@@ -91,6 +91,8 @@ export default function ImportButton({
   const [photoThumbnails, setPhotoThumbnails] = useState<{ file: File; url: string }[]>([]);
   const [excludedPhotos, setExcludedPhotos] = useState<Set<number>>(new Set());
   const [editedEventLabels, setEditedEventLabels] = useState<Record<string, string>>({});
+  const [showAssignAll, setShowAssignAll] = useState(false);
+  const [assignAllSearch, setAssignAllSearch] = useState("");
   const [fallbackLocation, setFallbackLocation] = useState<GpsCoords | null>(null);
   const [locationStatus, setLocationStatus] = useState<"idle" | "loading" | "granted" | "denied">("idle");
 
@@ -389,6 +391,8 @@ export default function ImportButton({
     setPhotoThumbnails([]);
     setExcludedPhotos(new Set());
     setEditedEventLabels({});
+    setShowAssignAll(false);
+    setAssignAllSearch("");
     setPhotoStep("closed");
     setPhotoError(null);
     setPhotoResults(null);
@@ -472,6 +476,18 @@ export default function ImportButton({
     // Notify parent so dashboard state stays in sync
     onDeleteEvent?.(source.id);
     onUpdateEventProp?.(target.id, { ...targetUpdates, attachments: mergedAttachments });
+  }
+
+  function handleAssignAllToClient(clientId: string) {
+    if (!photoResults) return;
+    const updatedEvents = photoResults.createdEvents.map((ev) => {
+      updateEvent(ev.id, { clientId });
+      onUpdateEventProp?.(ev.id, { clientId });
+      return { ...ev, clientId };
+    });
+    setPhotoResults({ ...photoResults, createdEvents: updatedEvents });
+    setShowAssignAll(false);
+    setAssignAllSearch("");
   }
 
   async function confirmStartTime() {
@@ -1071,8 +1087,57 @@ export default function ImportButton({
 
                   {photoResults.createdEvents.length > 0 && (
                     <div>
-                      <h3 className="text-xs font-semibold uppercase text-muted mb-2">Photo Events Created</h3>
-                      <p className="text-xs text-gray-400 mb-2">Grouped by time and location, added to calendar</p>
+                      <div className="flex items-center justify-between mb-2">
+                        <div>
+                          <h3 className="text-xs font-semibold uppercase text-muted">Photo Events Created</h3>
+                          <p className="text-xs text-gray-400">Grouped by time and location, added to calendar</p>
+                        </div>
+                        <div className="relative">
+                          <button
+                            onClick={() => setShowAssignAll(!showAssignAll)}
+                            className="px-2.5 py-1 rounded-lg text-[10px] font-medium text-accent border border-accent/30 hover:bg-accent/10 active:scale-95"
+                          >
+                            Assign All
+                          </button>
+                          {showAssignAll && (
+                            <div className="absolute right-0 top-full mt-1 z-50 w-56 bg-white border border-border rounded-lg shadow-lg overflow-hidden">
+                              <div className="p-2 border-b border-border">
+                                <input
+                                  type="text"
+                                  value={assignAllSearch}
+                                  onChange={(e) => setAssignAllSearch(e.target.value)}
+                                  placeholder="Search clients & projects..."
+                                  className="w-full text-xs px-2 py-1.5 border border-border rounded focus:outline-none focus:ring-2 focus:ring-accent/40"
+                                  autoFocus
+                                />
+                              </div>
+                              <div className="max-h-48 overflow-y-auto">
+                                {clients
+                                  .filter((c) => c.name.toLowerCase().includes(assignAllSearch.toLowerCase()))
+                                  .sort((a, b) => {
+                                    if (a.kind === "project" && b.kind !== "project") return -1;
+                                    if (a.kind !== "project" && b.kind === "project") return 1;
+                                    return a.name.localeCompare(b.name);
+                                  })
+                                  .map((c) => (
+                                    <button
+                                      key={c.id}
+                                      onClick={() => handleAssignAllToClient(c.id)}
+                                      className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-50 active:bg-gray-100 flex items-center gap-2"
+                                    >
+                                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${c.kind === "project" ? "bg-emerald-500" : "bg-blue-500"}`} />
+                                      <span className="truncate">{c.name}</span>
+                                      {c.kind === "project" && <span className="text-[9px] text-gray-400 shrink-0">project</span>}
+                                    </button>
+                                  ))}
+                                {clients.filter((c) => c.name.toLowerCase().includes(assignAllSearch.toLowerCase())).length === 0 && (
+                                  <div className="px-3 py-2 text-[10px] text-gray-400">No matches</div>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
                       <div className="space-y-2">
                         {photoResults.createdEvents.map((ev, idx) => {
                           const seg = photoResults.segments[idx];
