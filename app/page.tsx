@@ -25,6 +25,7 @@ import WeekNav from "@/components/WeekNav";
 import ImportButton from "@/components/ImportButton";
 import SettingsModal from "@/components/SettingsModal";
 import NavButtons from "@/components/NavButtons";
+import QuickAssign from "@/components/QuickAssign";
 
 type SidebarTab = "week" | "contacts" | "projects";
 
@@ -42,6 +43,7 @@ export default function Dashboard() {
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>("week");
 
   const [showSettings, setShowSettings] = useState(false);
+  const [showQuickAssign, setShowQuickAssign] = useState(false);
   const [mounted, setMounted] = useState(false);
 
   // Derive selectedEvent from ID
@@ -296,6 +298,20 @@ export default function Dashboard() {
     });
   }, []);
 
+  // Cmd+A to quick-assign selected event
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "a" && selectedEventId) {
+        const tag = (e.target as HTMLElement).tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+        e.preventDefault();
+        setShowQuickAssign(true);
+      }
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [selectedEventId]);
+
   if (!mounted) return null;
 
   return (
@@ -448,6 +464,15 @@ export default function Dashboard() {
       </div>
 
       <SettingsModal open={showSettings} onClose={() => setShowSettings(false)} />
+
+      {showQuickAssign && selectedEventId && (
+        <QuickAssign
+          clients={clients}
+          currentClientId={selectedEvent?.clientId}
+          onAssign={(clientId) => handleAssignClient(selectedEventId, clientId)}
+          onClose={() => setShowQuickAssign(false)}
+        />
+      )}
     </div>
   );
 }
