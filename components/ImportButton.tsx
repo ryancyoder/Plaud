@@ -327,10 +327,13 @@ export default function ImportButton({
 
         const strippedAtts: Attachment[] = seg.attachments.map(({ dataUrl, ...rest }) => ({ ...rest, dataUrl: "" }));
 
+        const durationMin = Math.round((seg.endTime.getTime() - seg.startTime.getTime()) / 60000);
+
         const newEvent = addEvent({
           type: "photo",
           date: seg.date,
           startTime: `${String(seg.startTime.getHours()).padStart(2, "0")}:${String(seg.startTime.getMinutes()).padStart(2, "0")}`,
+          duration: durationMin > 0 ? durationMin : undefined,
           label,
           attachments: strippedAtts,
           ...(seg.matchedClient ? { clientId: seg.matchedClient.id } : {}),
