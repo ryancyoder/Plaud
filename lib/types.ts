@@ -95,14 +95,29 @@ export const CLIENT_STATUSES: { key: ClientStatus; label: string; color: string 
   { key: "paid-in-full", label: "Paid in Full", color: "bg-green-50 text-green-700 border-green-200" },
 ];
 
+// --- Project Status ---
+
+export type ProjectStatus = "to-do" | "wip" | "waiting" | "done";
+
+export const PROJECT_STATUSES: { key: ProjectStatus; label: string; color: string }[] = [
+  { key: "to-do", label: "To Do", color: "bg-gray-100 text-gray-600 border-gray-200" },
+  { key: "wip", label: "Work in Progress", color: "bg-blue-50 text-blue-700 border-blue-200" },
+  { key: "waiting", label: "Waiting", color: "bg-amber-50 text-amber-700 border-amber-200" },
+  { key: "done", label: "Done", color: "bg-green-50 text-green-700 border-green-200" },
+];
+
 // --- Client ---
+
+export type ClientKind = "client" | "contact" | "project";
 
 export interface Client {
   id: string;
   name: string;
   company?: string;
-  type: "client" | "contact";
+  kind: ClientKind;
+  type: "client" | "contact"; // legacy — use `kind` instead
   status?: ClientStatus;
+  projectStatus?: ProjectStatus;
   phone?: string;
   email?: string;
   address?: string;

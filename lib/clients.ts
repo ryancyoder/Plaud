@@ -1,13 +1,44 @@
 "use client";
 
-import { Client, ClientStatus } from "./types";
+import { Client, ClientKind, ClientStatus } from "./types";
 
 const CLIENTS_KEY = "plaud-clients";
 
+export const INBOX_PROJECT_ID = "project-inbox";
+
+/**
+ * Load clients from localStorage.
+ * Migrates legacy records that lack the `kind` field and
+ * ensures the default INBOX project exists.
+ */
 export function loadClients(): Client[] {
   if (typeof window === "undefined") return [];
   const stored = localStorage.getItem(CLIENTS_KEY);
-  return stored ? JSON.parse(stored) : [];
+  const clients: Client[] = stored ? JSON.parse(stored) : [];
+
+  // Migrate: ensure every record has `kind`
+  let dirty = false;
+  for (const c of clients) {
+    if (!c.kind) {
+      c.kind = c.type === "contact" ? "contact" : "client";
+      dirty = true;
+    }
+  }
+
+  // Ensure default INBOX project exists
+  if (!clients.find((c) => c.id === INBOX_PROJECT_ID)) {
+    clients.push({
+      id: INBOX_PROJECT_ID,
+      name: "INBOX",
+      kind: "project",
+      type: "client",
+      projectStatus: "to-do",
+    });
+    dirty = true;
+  }
+
+  if (dirty) saveClients(clients);
+  return clients;
 }
 
 export function saveClients(clients: Client[]): void {
@@ -18,7 +49,7 @@ function generateId(): string {
   return `c-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export function addClient(name: string, company?: string, type: "client" | "contact" = "client"): Client {
+export function addClient(name: string, company?: string, kind: ClientKind = "client"): Client {
   const clients = loadClients();
   const existing = clients.find((c) => c.name.toLowerCase() === name.toLowerCase());
   if (existing) return existing;
@@ -27,7 +58,9 @@ export function addClient(name: string, company?: string, type: "client" | "cont
     id: generateId(),
     name,
     company,
-    type,
+    kind,
+    type: kind === "contact" ? "contact" : "client", // legacy compat
+    ...(kind === "project" ? { projectStatus: "to-do" as const } : {}),
   };
   clients.push(client);
   saveClients(clients);

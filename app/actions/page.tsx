@@ -94,7 +94,7 @@ export default function ActionsPage() {
     const groups: { status: ClientStatus; label: string; color: string; clients: Client[] }[] = [];
     for (const s of CLIENT_STATUSES) {
       const matching = clients
-        .filter((c) => (c.status || "lead") === s.key)
+        .filter((c) => (c.kind || c.type) !== "project" && (c.status || "lead") === s.key)
         .sort((a, b) => getLastName(a.name).localeCompare(getLastName(b.name)));
       if (matching.length > 0) {
         groups.push({ status: s.key, label: s.label, color: s.color, clients: matching });

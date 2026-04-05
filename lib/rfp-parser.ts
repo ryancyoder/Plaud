@@ -193,6 +193,7 @@ function parseScheduledDate(raw: string): string {
 export function rfpToClientData(rfp: ParsedRfp): Omit<Client, "id"> {
   return {
     name: rfp.name,
+    kind: "client",
     type: "client",
     status: "lead",
     phone: rfp.phone,
