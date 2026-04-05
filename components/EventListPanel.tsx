@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState, useCallback, useMemo } from "react";
-import { AppEvent, Client, CLIENT_STATUSES } from "@/lib/types";
+import { AppEvent, Client, CLIENT_STATUSES, EventType } from "@/lib/types";
 import { getDayName, getDayNumber, isToday, isPast, formatDuration, getTagColor, formatDate } from "@/lib/utils";
 
 interface EventListPanelProps {
@@ -24,10 +24,13 @@ export default function EventListPanel({ mode, date, client, events, selectedEve
 
 // --- Date Mode ---
 
+type DayViewMode = "list" | "calendar";
+
 function DateEventList({ date, events, selectedEventId, onSelectEvent, onDeleteEvent }: {
   date: string; events: AppEvent[]; selectedEventId: string | null;
   onSelectEvent: (eventId: string | null) => void; onDeleteEvent?: (eventId: string) => void;
 }) {
+  const [viewMode, setViewMode] = useState<DayViewMode>("list");
   const today = isToday(date);
   const past = isPast(date);
   const sorted = useMemo(
@@ -37,7 +40,7 @@ function DateEventList({ date, events, selectedEventId, onSelectEvent, onDeleteE
 
   return (
     <div className="flex flex-col h-full">
-      <div className={`shrink-0 flex items-center gap-3 px-4 py-3 border-b ${today ? "bg-accent text-white border-accent" : past ? "bg-gray-50 border-border" : "border-border"}`}>
+      <div className={`shrink-0 flex items-center gap-3 px-4 py-2.5 border-b ${today ? "bg-accent text-white border-accent" : past ? "bg-gray-50 border-border" : "border-border"}`}>
         <div className={`text-3xl font-bold leading-none ${today ? "text-white" : ""}`}>
           {getDayNumber(date)}
         </div>
@@ -45,33 +48,202 @@ function DateEventList({ date, events, selectedEventId, onSelectEvent, onDeleteE
           <div className={`text-sm font-semibold ${today ? "text-white" : ""}`}>{getDayName(date)}</div>
           <div className={`text-xs ${today ? "text-white/70" : "text-muted"}`}>{formatDate(date)}</div>
         </div>
-        <div className="ml-auto">
-          <span className={`text-xs ${today ? "text-white/70" : "text-muted"}`}>
+        <div className="ml-auto flex items-center gap-2">
+          <span className={`text-[10px] ${today ? "text-white/70" : "text-muted"}`}>
             {sorted.length} event{sorted.length !== 1 ? "s" : ""}
-            {sorted.length > 0 && ` · ${formatDuration(sorted.reduce((s, e) => s + (e.duration || 0), 0))}`}
           </span>
+          {/* View toggle */}
+          <div className={`flex rounded-lg overflow-hidden border ${today ? "border-white/30" : "border-border"}`}>
+            <button
+              onClick={() => setViewMode("list")}
+              className={`px-1.5 py-0.5 ${viewMode === "list"
+                ? today ? "bg-white/20 text-white" : "bg-gray-200 text-foreground"
+                : today ? "text-white/60 hover:bg-white/10" : "text-muted hover:bg-gray-50"
+              }`}
+              title="List view"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                <line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/>
+              </svg>
+            </button>
+            <button
+              onClick={() => setViewMode("calendar")}
+              className={`px-1.5 py-0.5 ${viewMode === "calendar"
+                ? today ? "bg-white/20 text-white" : "bg-gray-200 text-foreground"
+                : today ? "text-white/60 hover:bg-white/10" : "text-muted hover:bg-gray-50"
+              }`}
+              title="Calendar view"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="9" y1="2" x2="9" y2="6"/><line x1="15" y1="2" x2="15" y2="6"/>
+              </svg>
+            </button>
+          </div>
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto">
-        {sorted.length === 0 ? (
-          <div className="flex items-center justify-center h-full text-sm text-gray-300">
-            No events for this day
-          </div>
-        ) : (
-          <div className="divide-y divide-gray-100">
-            {sorted.map((ev) => (
-              <EventRow
-                key={ev.id}
-                event={ev}
-                onSelect={(e) => onSelectEvent(selectedEventId === e.id ? null : e.id)}
-                onDelete={onDeleteEvent}
-                isSelected={selectedEventId === ev.id}
-              />
-            ))}
+      {viewMode === "list" ? (
+        <div className="flex-1 overflow-y-auto">
+          {sorted.length === 0 ? (
+            <div className="flex items-center justify-center h-full text-sm text-gray-300">
+              No events for this day
+            </div>
+          ) : (
+            <div className="divide-y divide-gray-100">
+              {sorted.map((ev) => (
+                <EventRow
+                  key={ev.id}
+                  event={ev}
+                  onSelect={(e) => onSelectEvent(selectedEventId === e.id ? null : e.id)}
+                  onDelete={onDeleteEvent}
+                  isSelected={selectedEventId === ev.id}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      ) : (
+        <DayCalendarView
+          events={sorted}
+          selectedEventId={selectedEventId}
+          onSelectEvent={onSelectEvent}
+        />
+      )}
+    </div>
+  );
+}
+
+// --- Hourly Calendar View (5am–5pm) ---
+
+const CAL_START_HOUR = 5;
+const CAL_END_HOUR = 17; // 5pm
+const HOUR_HEIGHT = 52; // px per hour
+const TOTAL_HOURS = CAL_END_HOUR - CAL_START_HOUR;
+
+const EVENT_TYPE_COLORS: Partial<Record<EventType, string>> = {
+  "recording": "bg-rose-100 border-rose-300 text-rose-800",
+  "photo": "bg-pink-100 border-pink-300 text-pink-800",
+  "site-visit": "bg-green-100 border-green-300 text-green-800",
+  "phone-call": "bg-blue-100 border-blue-300 text-blue-800",
+  "text-message": "bg-indigo-100 border-indigo-300 text-indigo-800",
+  "email": "bg-purple-100 border-purple-300 text-purple-800",
+  "proposal": "bg-cyan-100 border-cyan-300 text-cyan-800",
+  "contract": "bg-teal-100 border-teal-300 text-teal-800",
+  "delivery": "bg-orange-100 border-orange-300 text-orange-800",
+  "payment": "bg-emerald-100 border-emerald-300 text-emerald-800",
+  "next-action": "bg-green-50 border-green-300 text-green-800",
+  "note": "bg-gray-100 border-gray-300 text-gray-700",
+  "status-change": "bg-amber-100 border-amber-300 text-amber-800",
+};
+
+function parseTime(t: string): number {
+  const [h, m] = t.split(":").map(Number);
+  return h + (m || 0) / 60;
+}
+
+function DayCalendarView({ events, selectedEventId, onSelectEvent }: {
+  events: AppEvent[];
+  selectedEventId: string | null;
+  onSelectEvent: (eventId: string | null) => void;
+}) {
+  // Current time indicator
+  const now = new Date();
+  const currentHour = now.getHours() + now.getMinutes() / 60;
+  const showNowLine = currentHour >= CAL_START_HOUR && currentHour <= CAL_END_HOUR;
+
+  // Position events that have start times
+  const positioned = useMemo(() => {
+    return events
+      .filter((ev) => ev.startTime)
+      .map((ev) => {
+        const start = parseTime(ev.startTime!);
+        const duration = ev.duration ? ev.duration / 60 : 0.5; // default 30min if no duration
+        const top = (start - CAL_START_HOUR) * HOUR_HEIGHT;
+        const height = Math.max(duration * HOUR_HEIGHT, 20); // min 20px
+        return { event: ev, top, height, start };
+      })
+      .filter((p) => p.start >= CAL_START_HOUR - 0.5 && p.start <= CAL_END_HOUR);
+  }, [events]);
+
+  // Events without start times
+  const unpositioned = useMemo(
+    () => events.filter((ev) => !ev.startTime),
+    [events]
+  );
+
+  return (
+    <div className="flex-1 overflow-y-auto relative">
+      <div className="relative" style={{ height: TOTAL_HOURS * HOUR_HEIGHT }}>
+        {/* Hour lines and labels */}
+        {Array.from({ length: TOTAL_HOURS + 1 }, (_, i) => {
+          const hour = CAL_START_HOUR + i;
+          const label = hour === 0 ? "12 AM" : hour < 12 ? `${hour} AM` : hour === 12 ? "12 PM" : `${hour - 12} PM`;
+          return (
+            <div key={hour} className="absolute left-0 right-0" style={{ top: i * HOUR_HEIGHT }}>
+              <div className="flex items-start">
+                <span className="text-[9px] text-gray-400 w-10 text-right pr-2 -mt-1.5 shrink-0">{label}</span>
+                <div className="flex-1 border-t border-gray-100" />
+              </div>
+            </div>
+          );
+        })}
+
+        {/* Now indicator */}
+        {showNowLine && (
+          <div
+            className="absolute left-10 right-0 z-10 flex items-center"
+            style={{ top: (currentHour - CAL_START_HOUR) * HOUR_HEIGHT }}
+          >
+            <div className="w-2 h-2 rounded-full bg-red-500 -ml-1" />
+            <div className="flex-1 border-t-2 border-red-500" />
           </div>
         )}
+
+        {/* Positioned events */}
+        {positioned.map(({ event, top, height }) => {
+          const isSelected = selectedEventId === event.id;
+          const colorClass = EVENT_TYPE_COLORS[event.type] || "bg-gray-100 border-gray-300 text-gray-700";
+          return (
+            <button
+              key={event.id}
+              onClick={() => onSelectEvent(isSelected ? null : event.id)}
+              className={`absolute left-11 right-2 rounded-lg border px-2 py-1 text-left overflow-hidden transition-shadow ${colorClass} ${
+                isSelected ? "ring-2 ring-accent shadow-md z-20" : "hover:shadow-sm z-10"
+              }`}
+              style={{ top, height: Math.max(height, 20), minHeight: 20 }}
+            >
+              <div className="text-[10px] font-semibold truncate leading-tight">{event.label}</div>
+              {height >= 32 && (
+                <div className="text-[9px] opacity-70 truncate">
+                  {event.startTime}{event.duration ? ` · ${formatDuration(event.duration)}` : ""}
+                </div>
+              )}
+            </button>
+          );
+        })}
       </div>
+
+      {/* Events without times shown at bottom */}
+      {unpositioned.length > 0 && (
+        <div className="border-t border-border px-3 py-2">
+          <div className="text-[9px] font-semibold uppercase text-muted mb-1">No time set</div>
+          {unpositioned.map((ev) => {
+            const isSelected = selectedEventId === ev.id;
+            const colorClass = EVENT_TYPE_COLORS[ev.type] || "bg-gray-100 border-gray-300 text-gray-700";
+            return (
+              <button
+                key={ev.id}
+                onClick={() => onSelectEvent(isSelected ? null : ev.id)}
+                className={`w-full text-left rounded-lg border px-2 py-1.5 mb-1 text-[10px] font-semibold truncate ${colorClass} ${
+                  isSelected ? "ring-2 ring-accent" : ""
+                }`}
+              >
+                {ev.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
