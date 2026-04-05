@@ -46,6 +46,7 @@ export default function Dashboard() {
 
   const [showSettings, setShowSettings] = useState(false);
   const [showQuickAssign, setShowQuickAssign] = useState(false);
+  const [focusArea, setFocusArea] = useState<"week" | "day">("day");
   const [mounted, setMounted] = useState(false);
 
   // Derive selectedEvent from ID
@@ -124,6 +125,11 @@ export default function Dashboard() {
     }
     return events.filter((ev) => ev.date === selectedDate);
   }, [sidebarTab, selectedClient, selectedDate, events]);
+
+  const sortedCenterEvents = useMemo(() =>
+    [...centerPanelEvents].sort((a, b) => (a.startTime || "").localeCompare(b.startTime || "")),
+    [centerPanelEvents]
+  );
 
   const eventCountByClient = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -376,27 +382,78 @@ export default function Dashboard() {
     });
   }, [selectedEventId, events]);
 
-  // Keyboard shortcuts: Cmd+A (assign), Cmd+Up/Down (merge)
+  // Keyboard navigation & shortcuts
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
-      if (!(e.metaKey || e.ctrlKey) || !selectedEventId) return;
       const tag = (e.target as HTMLElement).tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
 
-      if (e.key === "a") {
+      const cmd = e.metaKey || e.ctrlKey;
+
+      // Cmd+A — quick assign
+      if (cmd && e.key === "a" && selectedEventId) {
         e.preventDefault();
         setShowQuickAssign(true);
-      } else if (e.key === "ArrowUp") {
+        return;
+      }
+
+      // Cmd+Up/Down — merge events
+      if (cmd && (e.key === "ArrowUp" || e.key === "ArrowDown") && selectedEventId) {
         e.preventDefault();
-        handleMerge("up");
-      } else if (e.key === "ArrowDown") {
+        handleMerge(e.key === "ArrowUp" ? "up" : "down");
+        return;
+      }
+
+      // Left/Right — switch focus between week nav and day view
+      if (e.key === "ArrowLeft" && !cmd) {
         e.preventDefault();
-        handleMerge("down");
+        setFocusArea("week");
+        return;
+      }
+      if (e.key === "ArrowRight" && !cmd) {
+        e.preventDefault();
+        setFocusArea("day");
+        return;
+      }
+
+      // Up/Down — navigate within focused area
+      if ((e.key === "ArrowUp" || e.key === "ArrowDown") && !cmd) {
+        e.preventDefault();
+        if (focusArea === "week") {
+          // Move selected date by one day
+          const d = new Date(selectedDate + "T00:00:00");
+          d.setDate(d.getDate() + (e.key === "ArrowUp" ? -1 : 1));
+          // Don't go into the future
+          if (d.getTime() <= Date.now()) {
+            const str = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+            setSelectedDate(str);
+            setSelectedEventId(null);
+          }
+        } else {
+          // Move event selection up/down in day view
+          if (sortedCenterEvents.length === 0) return;
+          const currentIdx = sortedCenterEvents.findIndex((ev) => ev.id === selectedEventId);
+          if (e.key === "ArrowDown") {
+            const nextIdx = currentIdx + 1;
+            if (nextIdx < sortedCenterEvents.length) {
+              setSelectedEventId(sortedCenterEvents[nextIdx].id);
+            } else if (currentIdx === -1) {
+              setSelectedEventId(sortedCenterEvents[0].id);
+            }
+          } else {
+            const prevIdx = currentIdx - 1;
+            if (prevIdx >= 0) {
+              setSelectedEventId(sortedCenterEvents[prevIdx].id);
+            } else if (currentIdx === -1) {
+              setSelectedEventId(sortedCenterEvents[sortedCenterEvents.length - 1].id);
+            }
+          }
+        }
       }
     }
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [selectedEventId, handleMerge]);
+  }, [selectedEventId, selectedDate, focusArea, sortedCenterEvents, handleMerge]);
 
   if (!mounted) return null;
 
@@ -466,7 +523,7 @@ export default function Dashboard() {
       {/* Three-panel layout */}
       <div className="flex-1 flex overflow-hidden">
         {/* Left: Sidebar with tab toggle */}
-        <div className="w-56 shrink-0 border-r border-border overflow-hidden flex flex-col">
+        <div className={`w-56 shrink-0 border-r overflow-hidden flex flex-col ${focusArea === "week" && sidebarTab === "week" ? "border-r-accent/50 bg-accent/[0.02]" : "border-border"}`}>
           <div className="shrink-0 flex border-b border-border">
             {([
               { key: "week" as SidebarTab, label: "Week", icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="inline-block mr-0.5 -mt-0.5"><rect x="3" y="4" width="18" height="18" rx="2" ry="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg> },
@@ -518,7 +575,7 @@ export default function Dashboard() {
         </div>
 
         {/* Center: Event List */}
-        <div className="flex-1 flex flex-col overflow-hidden border-r border-border">
+        <div className={`flex-1 flex flex-col overflow-hidden border-r ${focusArea === "day" ? "border-r-accent/50" : "border-border"}`}>
           <EventListPanel
             mode={(sidebarTab === "contacts" || sidebarTab === "projects") && selectedClient ? "client" : "date"}
             date={selectedDate}
