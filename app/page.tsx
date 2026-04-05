@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { AppEvent, Attachment, Client } from "@/lib/types";
-import { getWeekDates } from "@/lib/mock-data";
+
 import { loadEvents, saveEvents, updateEvent } from "@/lib/event-store";
 import { loadClients } from "@/lib/clients";
 import {
@@ -28,16 +28,6 @@ import NavButtons from "@/components/NavButtons";
 
 type SidebarTab = "calendar" | "contacts";
 
-function getWeekLabel(weekDates: string[]): string {
-  const start = new Date(weekDates[0] + "T00:00:00");
-  const end = new Date(weekDates[6] + "T00:00:00");
-  const opts: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" };
-  if (start.getFullYear() !== end.getFullYear()) {
-    return `${start.toLocaleDateString("en-US", { ...opts, year: "numeric" })} – ${end.toLocaleDateString("en-US", { ...opts, year: "numeric" })}`;
-  }
-  return `${start.toLocaleDateString("en-US", opts)} – ${end.toLocaleDateString("en-US", opts)}, ${start.getFullYear()}`;
-}
-
 function todayDateStr(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -48,7 +38,6 @@ export default function Dashboard() {
   const [events, setEvents] = useState<AppEvent[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
-  const [weekOffset, setWeekOffset] = useState(0);
   const [selectedDate, setSelectedDate] = useState(todayDateStr());
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>("calendar");
 
@@ -119,20 +108,6 @@ export default function Dashboard() {
       }
     }
   }, []);
-
-  const currentWeek = getWeekDates(weekOffset);
-
-  // Keep week header in sync with selected date
-  useEffect(() => {
-    if (!currentWeek.includes(selectedDate)) {
-      const targetMs = new Date(selectedDate + "T00:00:00").getTime();
-      const now = new Date();
-      const day = now.getDay();
-      const mondayMs = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (day === 0 ? 6 : day - 1)).getTime();
-      const diffWeeks = Math.floor((targetMs - mondayMs) / (7 * 24 * 60 * 60 * 1000));
-      setWeekOffset(diffWeeks);
-    }
-  }, [selectedDate, currentWeek]);
 
   // Center panel events depend on active sidebar tab
   const centerPanelEvents = useMemo(() => {
@@ -323,8 +298,6 @@ export default function Dashboard() {
 
   if (!mounted) return null;
 
-  const isCurrentWeek = weekOffset === 0;
-
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-background">
       {/* Header */}
@@ -356,33 +329,6 @@ export default function Dashboard() {
           >
             Map
           </Link>
-        </div>
-
-        {/* Week navigation */}
-        <div className="flex items-center gap-1.5">
-          <button
-            onClick={() => setWeekOffset((w) => w - 1)}
-            className="p-1.5 rounded-lg text-muted hover:bg-gray-100 active:scale-95"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="15 18 9 12 15 6" /></svg>
-          </button>
-          <div className="flex items-center gap-1.5">
-            <span className="text-sm font-semibold min-w-[160px] text-center">{getWeekLabel(currentWeek)}</span>
-            {!isCurrentWeek && (
-              <button
-                onClick={() => setWeekOffset(0)}
-                className="text-[10px] px-2 py-0.5 rounded-full bg-accent text-white hover:bg-blue-600 active:scale-95"
-              >
-                Today
-              </button>
-            )}
-          </div>
-          <button
-            onClick={() => setWeekOffset((w) => w + 1)}
-            className="p-1.5 rounded-lg text-muted hover:bg-gray-100 active:scale-95"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="9 18 15 12 9 6" /></svg>
-          </button>
         </div>
 
         <div className="flex items-center gap-2">
@@ -447,7 +393,6 @@ export default function Dashboard() {
           <div className="flex-1 overflow-hidden">
             {sidebarTab === "calendar" ? (
               <WeekNav
-                weekDates={currentWeek}
                 selectedDate={selectedDate}
                 onSelectDate={handleSelectDate}
                 getRecordingsForDate={getRecordingsForDate}

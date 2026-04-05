@@ -77,7 +77,6 @@ function getEventTypeCounts(events: AppEvent[]): { type: EventType; count: numbe
 }
 
 interface WeekNavProps {
-  weekDates: string[];
   selectedDate: string;
   onSelectDate: (date: string) => void;
   getRecordingsForDate: (date: string) => AppEvent[];
