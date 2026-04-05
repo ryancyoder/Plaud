@@ -258,39 +258,32 @@ function EventView({
 
   const canEdit = !!onUpdateEvent;
   const fieldClass = "px-1.5 py-0.5 border border-accent rounded text-xs focus:outline-none focus:ring-1 focus:ring-accent";
-
-  function EditableField({ field, display, inputType, inputWidth }: { field: "label" | "date" | "time" | "duration"; display: string; inputType?: string; inputWidth?: string }) {
-    if (editingField === field) {
-      return (
-        <input
-          ref={editInputRef}
-          value={editVal}
-          onChange={(e) => setEditVal(e.target.value)}
-          onKeyDown={handleEditKeyDown}
-          onBlur={saveEdit}
-          type={inputType || "text"}
-          className={fieldClass}
-          style={{ width: inputWidth || "auto" }}
-        />
-      );
-    }
-    return (
-      <span
-        onClick={canEdit ? () => startEdit(field) : undefined}
-        className={canEdit ? "cursor-pointer hover:bg-gray-100 rounded px-0.5 -mx-0.5 transition-colors" : ""}
-        title={canEdit ? "Click to edit" : undefined}
-      >
-        {display}
-      </span>
-    );
-  }
+  const clickClass = canEdit ? "cursor-pointer hover:bg-gray-100 rounded px-0.5 -mx-0.5 transition-colors" : "";
 
   return (
     <div className="p-4">
       {/* Editable title */}
       <div className="flex items-start justify-between mb-1">
         <div className="flex-1 min-w-0 mr-2">
-          <EditableField field="label" display={event.label} inputWidth="100%" />
+          {editingField === "label" ? (
+            <input
+              ref={editInputRef}
+              value={editVal}
+              onChange={(e) => setEditVal(e.target.value)}
+              onKeyDown={handleEditKeyDown}
+              onBlur={saveEdit}
+              className={fieldClass}
+              style={{ width: "100%" }}
+            />
+          ) : (
+            <span
+              onClick={canEdit ? () => startEdit("label") : undefined}
+              className={clickClass}
+              title={canEdit ? "Click to edit" : undefined}
+            >
+              {event.label}
+            </span>
+          )}
         </div>
         <button onClick={onClose} className="p-1.5 -mr-1 text-muted hover:text-foreground rounded-lg hover:bg-gray-100 shrink-0">
           <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2">
@@ -301,11 +294,23 @@ function EventView({
 
       {/* Editable date / time / duration */}
       <div className="flex items-center gap-1.5 text-xs text-muted mb-3">
-        <EditableField field="date" display={formatDate(event.date)} inputType="date" inputWidth="130px" />
+        {editingField === "date" ? (
+          <input ref={editInputRef} value={editVal} onChange={(e) => setEditVal(e.target.value)} onKeyDown={handleEditKeyDown} onBlur={saveEdit} type="date" className={fieldClass} style={{ width: 130 }} />
+        ) : (
+          <span onClick={canEdit ? () => startEdit("date") : undefined} className={clickClass} title={canEdit ? "Click to edit" : undefined}>{formatDate(event.date)}</span>
+        )}
         <span>·</span>
-        <EditableField field="time" display={event.startTime || "—"} inputType="time" inputWidth="90px" />
+        {editingField === "time" ? (
+          <input ref={editInputRef} value={editVal} onChange={(e) => setEditVal(e.target.value)} onKeyDown={handleEditKeyDown} onBlur={saveEdit} type="time" className={fieldClass} style={{ width: 90 }} />
+        ) : (
+          <span onClick={canEdit ? () => startEdit("time") : undefined} className={clickClass} title={canEdit ? "Click to edit" : undefined}>{event.startTime || "—"}</span>
+        )}
         <span>·</span>
-        <EditableField field="duration" display={formatDuration(event.duration || 0)} inputType="number" inputWidth="60px" />
+        {editingField === "duration" ? (
+          <input ref={editInputRef} value={editVal} onChange={(e) => setEditVal(e.target.value)} onKeyDown={handleEditKeyDown} onBlur={saveEdit} type="number" className={fieldClass} style={{ width: 60 }} />
+        ) : (
+          <span onClick={canEdit ? () => startEdit("duration") : undefined} className={clickClass} title={canEdit ? "Click to edit" : undefined}>{formatDuration(event.duration || 0)}</span>
+        )}
       </div>
 
       {/* Client assignment */}
