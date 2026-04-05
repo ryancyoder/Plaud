@@ -63,7 +63,7 @@ export default function ImportButton({
   const [pasteStartTime, setPasteStartTime] = useState("");
 
   // Photo import state
-  type PhotoStep = "closed" | "config" | "processing" | "results";
+  type PhotoStep = "closed" | "config" | "preview" | "processing" | "results";
   const [photoStep, setPhotoStep] = useState<PhotoStep>("closed");
   const [photoGapMinutes, setPhotoGapMinutes] = useState(30);
   const [photoMatchRecordings, setPhotoMatchRecordings] = useState(true);
@@ -77,6 +77,8 @@ export default function ImportButton({
     diagnostics: { fileTypes: Record<string, number>; gpsFound: number; gpsTotal: number; clientsWithCoords: number; clientsTotal: number; matchDetails: { segmentLabel: string; closestClient: string | null; distanceMeters: number | null; matchMethod?: "gps" | "address" | null }[] };
   } | null>(null);
   const [pendingImageFiles, setPendingImageFiles] = useState<FileList | null>(null);
+  const [photoThumbnails, setPhotoThumbnails] = useState<{ file: File; url: string }[]>([]);
+  const [excludedPhotos, setExcludedPhotos] = useState<Set<number>>(new Set());
   const [fallbackLocation, setFallbackLocation] = useState<GpsCoords | null>(null);
   const [locationStatus, setLocationStatus] = useState<"idle" | "loading" | "granted" | "denied">("idle");
 
@@ -173,14 +175,56 @@ export default function ImportButton({
     }
   }
 
+  async function goToPhotoPreview() {
+    if (!pendingImageFiles) return;
+    // Generate thumbnails for preview
+    const thumbs: { file: File; url: string }[] = [];
+    for (let i = 0; i < pendingImageFiles.length; i++) {
+      const file = pendingImageFiles[i];
+      if (file.type.startsWith("image/")) {
+        const url = URL.createObjectURL(file);
+        thumbs.push({ file, url });
+      }
+    }
+    setPhotoThumbnails(thumbs);
+    setExcludedPhotos(new Set());
+    setPhotoStep("preview");
+  }
+
+  function togglePhotoExclusion(idx: number) {
+    setExcludedPhotos(prev => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx);
+      else next.add(idx);
+      return next;
+    });
+  }
+
   async function processPhotos() {
     if (!pendingImageFiles) return;
+    // Filter out excluded photos
+    const filesToImport = photoThumbnails
+      .filter((_, i) => !excludedPhotos.has(i))
+      .map(t => t.file);
+    if (filesToImport.length === 0) {
+      setPhotoError("No photos selected for import");
+      setPhotoStep("config");
+      return;
+    }
+    // Clean up object URLs
+    photoThumbnails.forEach(t => URL.revokeObjectURL(t.url));
+    setPhotoThumbnails([]);
     setPhotoStep("processing");
     setPhotoError(null);
 
+    // Create a synthetic FileList-like array
+    const dataTransfer = new DataTransfer();
+    filesToImport.forEach(f => dataTransfer.items.add(f));
+    const filteredFiles = dataTransfer.files;
+
     try {
       const result = await batchMatchPhotos(
-        pendingImageFiles,
+        filteredFiles,
         photoMatchRecordings ? events : [],
         photoGapMinutes,
         photoBufferMinutes,
@@ -245,7 +289,7 @@ export default function ImportButton({
         matched: result.matched,
         createdEvents: created,
         segments: result.unmatchedSegments,
-        totalFiles: pendingImageFiles.length,
+        totalFiles: filteredFiles.length,
         diagnostics: result.diagnostics,
       });
       setPhotoStep("results");
@@ -257,6 +301,9 @@ export default function ImportButton({
   }
 
   function closePhotoModal() {
+    photoThumbnails.forEach(t => URL.revokeObjectURL(t.url));
+    setPhotoThumbnails([]);
+    setExcludedPhotos(new Set());
     setPhotoStep("closed");
     setPhotoError(null);
     setPhotoResults(null);
@@ -599,48 +646,49 @@ export default function ImportButton({
       {photoStep !== "closed" && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={closePhotoModal}>
           <div
-            className="bg-white rounded-xl shadow-xl max-w-md w-full mx-4 max-h-[80vh] flex flex-col"
+            className="bg-white rounded-xl shadow-xl max-w-2xl w-full mx-4 max-h-[85vh] flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-              <h2 className="text-sm font-bold">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+              <h2 className="text-base font-bold">
                 {photoStep === "config" && "Import Photos"}
+                {photoStep === "preview" && `Select Photos (${photoThumbnails.length - excludedPhotos.size} of ${photoThumbnails.length})`}
                 {photoStep === "processing" && "Processing..."}
                 {photoStep === "results" && "Import Results"}
               </h2>
-              <button onClick={closePhotoModal} className="p-1 text-muted hover:text-foreground rounded-lg hover:bg-gray-100">
-                <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2">
+              <button onClick={closePhotoModal} className="p-1.5 text-muted hover:text-foreground rounded-lg hover:bg-gray-100">
+                <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M5 5l10 10M15 5L5 15" />
                 </svg>
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            <div className="flex-1 overflow-y-auto p-5 space-y-4">
               {photoStep === "config" && (
                 <>
                   {photoError && (
                     <div className="rounded-lg bg-red-50 border border-red-200 p-3">
-                      <p className="text-xs font-semibold text-red-700 mb-1">Import Error</p>
-                      <p className="text-[10px] text-red-600 break-words">{photoError}</p>
+                      <p className="text-sm font-semibold text-red-700 mb-1">Import Error</p>
+                      <p className="text-xs text-red-600 break-words">{photoError}</p>
                     </div>
                   )}
-                  <p className="text-xs text-muted">
+                  <p className="text-sm text-muted">
                     {pendingImageFiles ? `${pendingImageFiles.length} photo${pendingImageFiles.length !== 1 ? "s" : ""} selected` : "Configure photo import settings"}
                   </p>
 
                   <div className="space-y-1.5">
-                    <label className="text-[10px] font-semibold uppercase text-muted">Time gap between events</label>
-                    <p className="text-[10px] text-gray-400">Photos separated by more than this gap are split into separate events</p>
+                    <label className="text-xs font-semibold uppercase text-muted">Time gap between events</label>
+                    <p className="text-xs text-gray-400">Photos separated by more than this gap are split into separate events</p>
                     <div className="flex items-center gap-2">
-                      <input type="range" min={5} max={120} step={5} value={photoGapMinutes} onChange={(e) => setPhotoGapMinutes(Number(e.target.value))} className="flex-1 h-1.5 accent-accent" />
-                      <span className="text-xs font-medium w-16 text-right">{photoGapMinutes} min</span>
+                      <input type="range" min={5} max={120} step={5} value={photoGapMinutes} onChange={(e) => setPhotoGapMinutes(Number(e.target.value))} className="flex-1 h-2 accent-accent" />
+                      <span className="text-sm font-medium w-16 text-right">{photoGapMinutes} min</span>
                     </div>
                   </div>
 
                   <div className="flex items-center justify-between py-1">
                     <div>
-                      <p className="text-xs font-medium">Match to recordings</p>
-                      <p className="text-[10px] text-gray-400">Auto-attach photos taken during a recording</p>
+                      <p className="text-sm font-medium">Match to recordings</p>
+                      <p className="text-xs text-gray-400">Auto-attach photos taken during a recording</p>
                     </div>
                     <button
                       onClick={() => setPhotoMatchRecordings(!photoMatchRecordings)}
@@ -651,26 +699,26 @@ export default function ImportButton({
                   </div>
 
                   {photoMatchRecordings && (
-                    <div className="space-y-1.5 pl-2 border-l-2 border-accent/20">
-                      <label className="text-[10px] font-semibold uppercase text-muted">Recording match buffer</label>
-                      <p className="text-[10px] text-gray-400">How far before/after a recording to match photos</p>
+                    <div className="space-y-1.5 pl-3 border-l-2 border-accent/20">
+                      <label className="text-xs font-semibold uppercase text-muted">Recording match buffer</label>
+                      <p className="text-xs text-gray-400">How far before/after a recording to match photos</p>
                       <div className="flex items-center gap-2">
-                        <input type="range" min={0} max={60} step={5} value={photoBufferMinutes} onChange={(e) => setPhotoBufferMinutes(Number(e.target.value))} className="flex-1 h-1.5 accent-accent" />
-                        <span className="text-xs font-medium w-16 text-right">{photoBufferMinutes} min</span>
+                        <input type="range" min={0} max={60} step={5} value={photoBufferMinutes} onChange={(e) => setPhotoBufferMinutes(Number(e.target.value))} className="flex-1 h-2 accent-accent" />
+                        <span className="text-sm font-medium w-16 text-right">{photoBufferMinutes} min</span>
                       </div>
                     </div>
                   )}
 
                   {/* Location info */}
                   <div className="rounded-lg bg-amber-50 border border-amber-200 p-3 space-y-2">
-                    <p className="text-[10px] text-amber-800 font-medium">
+                    <p className="text-xs text-amber-800 font-medium">
                       To keep photo GPS data, tap <strong>Browse</strong> (not Photo Library) when the picker appears. iOS strips location from Photo Library uploads.
                     </p>
                   </div>
 
                   {/* Location fallback */}
                   <div className="rounded-lg bg-gray-50 border border-gray-200 p-3 space-y-2">
-                    <p className="text-[10px] text-muted">
+                    <p className="text-xs text-muted">
                       If photos lack GPS, use your current location as fallback for naming and client matching.
                     </p>
                     {fallbackLocation ? (
@@ -719,10 +767,64 @@ export default function ImportButton({
                 </>
               )}
 
+              {photoStep === "preview" && (
+                <>
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm text-muted">Tap photos to exclude them from import</p>
+                    <button
+                      onClick={() => {
+                        if (excludedPhotos.size === photoThumbnails.length) {
+                          setExcludedPhotos(new Set());
+                        } else {
+                          setExcludedPhotos(new Set(photoThumbnails.map((_, i) => i)));
+                        }
+                      }}
+                      className="text-xs font-medium text-accent hover:text-blue-700"
+                    >
+                      {excludedPhotos.size === photoThumbnails.length ? "Select All" : "Deselect All"}
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-4 gap-2">
+                    {photoThumbnails.map((thumb, idx) => {
+                      const excluded = excludedPhotos.has(idx);
+                      return (
+                        <button
+                          key={idx}
+                          onClick={() => togglePhotoExclusion(idx)}
+                          className={`relative aspect-square rounded-lg overflow-hidden border-2 transition-all ${
+                            excluded ? "border-red-300 opacity-40" : "border-green-400"
+                          }`}
+                        >
+                          <img src={thumb.url} alt={thumb.file.name} className="w-full h-full object-cover" />
+                          {excluded && (
+                            <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+                              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5">
+                                <line x1="4" y1="4" x2="20" y2="20" />
+                                <line x1="20" y1="4" x2="4" y2="20" />
+                              </svg>
+                            </div>
+                          )}
+                          {!excluded && (
+                            <div className="absolute top-1 right-1 w-5 h-5 rounded-full bg-green-500 flex items-center justify-center">
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3">
+                                <polyline points="20 6 9 17 4 12" />
+                              </svg>
+                            </div>
+                          )}
+                          <div className="absolute bottom-0 left-0 right-0 bg-black/50 px-1 py-0.5">
+                            <span className="text-[9px] text-white truncate block">{thumb.file.name}</span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+
               {photoStep === "processing" && (
                 <div className="flex flex-col items-center py-8 gap-3">
-                  <div className="w-8 h-8 border-2 border-accent border-t-transparent rounded-full animate-spin" />
-                  <p className="text-xs text-muted">Reading EXIF data and matching locations...</p>
+                  <div className="w-10 h-10 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+                  <p className="text-sm text-muted">Reading EXIF data and matching locations...</p>
                 </div>
               )}
 
@@ -860,19 +962,36 @@ export default function ImportButton({
               )}
             </div>
 
-            <div className="px-4 py-3 border-t border-border">
+            <div className="px-5 py-4 border-t border-border">
               {photoStep === "config" && (
                 <button
-                  onClick={processPhotos}
-                  className="w-full py-2.5 rounded-lg bg-accent text-white text-xs font-semibold hover:bg-blue-600 active:scale-[0.98]"
+                  onClick={goToPhotoPreview}
+                  className="w-full py-3 rounded-lg bg-accent text-white text-sm font-semibold hover:bg-blue-600 active:scale-[0.98]"
                 >
-                  Import {pendingImageFiles?.length || 0} Photo{(pendingImageFiles?.length || 0) !== 1 ? "s" : ""}
+                  Review {pendingImageFiles?.length || 0} Photo{(pendingImageFiles?.length || 0) !== 1 ? "s" : ""}
                 </button>
+              )}
+              {photoStep === "preview" && (
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setPhotoStep("config")}
+                    className="flex-1 py-3 rounded-lg border border-border text-sm font-semibold hover:bg-gray-50 active:scale-[0.98]"
+                  >
+                    Back
+                  </button>
+                  <button
+                    onClick={processPhotos}
+                    disabled={excludedPhotos.size === photoThumbnails.length}
+                    className="flex-1 py-3 rounded-lg bg-accent text-white text-sm font-semibold hover:bg-blue-600 active:scale-[0.98] disabled:opacity-40"
+                  >
+                    Import {photoThumbnails.length - excludedPhotos.size} Photo{(photoThumbnails.length - excludedPhotos.size) !== 1 ? "s" : ""}
+                  </button>
+                </div>
               )}
               {photoStep === "results" && (
                 <button
                   onClick={closePhotoModal}
-                  className="w-full py-2.5 rounded-lg bg-accent text-white text-xs font-semibold hover:bg-blue-600 active:scale-[0.98]"
+                  className="w-full py-3 rounded-lg bg-accent text-white text-sm font-semibold hover:bg-blue-600 active:scale-[0.98]"
                 >
                   Done
                 </button>
