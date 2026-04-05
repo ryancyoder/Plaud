@@ -153,7 +153,7 @@ function hoursToTimeStr(h: number): string {
 
 // Snap to 5-minute increments
 function snapHours(h: number): number {
-  return Math.round(h * 12) / 12; // 12 = 60/5
+  return Math.round(h * 4) / 4; // 4 = 60/15
 }
 
 function DayCalendarView({ events, selectedEventId, onSelectEvent, onUpdateEvent }: {
@@ -225,7 +225,7 @@ function DayCalendarView({ events, selectedEventId, onSelectEvent, onUpdateEvent
       setDragPreview({ top, height });
     } else {
       const newDuration = snapHours(ds.origDuration + deltaHours);
-      const clamped = Math.max(5 / 60, Math.min(CAL_END_HOUR - ds.origHour, newDuration));
+      const clamped = Math.max(15 / 60, Math.min(CAL_END_HOUR - ds.origHour, newDuration));
       const top = (ds.origHour - CAL_START_HOUR) * HOUR_HEIGHT;
       const height = Math.max(clamped * HOUR_HEIGHT, 20);
       setDragPreview({ top, height });
@@ -250,7 +250,7 @@ function DayCalendarView({ events, selectedEventId, onSelectEvent, onUpdateEvent
       });
     } else {
       const newDuration = snapHours(ds.origDuration + deltaHours);
-      const clamped = Math.max(5 / 60, Math.min(CAL_END_HOUR - ds.origHour, newDuration));
+      const clamped = Math.max(15 / 60, Math.min(CAL_END_HOUR - ds.origHour, newDuration));
       onUpdateEvent(ds.eventId, {
         duration: Math.round(clamped * 60),
       });
@@ -265,7 +265,7 @@ function DayCalendarView({ events, selectedEventId, onSelectEvent, onUpdateEvent
       ref={containerRef}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
-      style={{ touchAction: dragState ? "none" : "auto" }}
+      style={{ touchAction: dragState ? "none" : "auto", userSelect: dragState ? "none" : "auto" }}
     >
       <div className="relative" style={{ height: TOTAL_HOURS * HOUR_HEIGHT }}>
         {/* Hour lines and labels */}
