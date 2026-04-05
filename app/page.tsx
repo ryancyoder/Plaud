@@ -9,7 +9,9 @@ import { loadClients } from "@/lib/clients";
 import {
   saveAttachments as dbSaveAttachments,
   removeAttachment as dbRemoveAttachment,
+  loadAttachments as dbLoadAttachments,
   loadAllAttachments,
+  removeAttachmentsForTranscript as dbRemoveAttachmentsForEvent,
   clearAllAttachments,
   clearPendingPhotos,
   resizeImage,
@@ -298,19 +300,103 @@ export default function Dashboard() {
     });
   }, []);
 
-  // Cmd+A to quick-assign selected event
+  // Merge selected event with adjacent event
+  const handleMerge = useCallback(async (direction: "up" | "down") => {
+    if (!selectedEventId) return;
+    const selected = events.find((ev) => ev.id === selectedEventId);
+    if (!selected) return;
+
+    // Get same-day events sorted by start time
+    const sameDayEvents = events
+      .filter((ev) => ev.date === selected.date && ev.id !== selected.id)
+      .sort((a, b) => (a.startTime || "").localeCompare(b.startTime || ""));
+
+    // Find adjacent event
+    let target: AppEvent | undefined;
+    if (direction === "up") {
+      // First event that starts before selected
+      target = [...sameDayEvents]
+        .reverse()
+        .find((ev) => (ev.startTime || "") < (selected.startTime || ""));
+    } else {
+      // First event that starts after selected
+      target = sameDayEvents
+        .find((ev) => (ev.startTime || "") > (selected.startTime || ""));
+    }
+
+    if (!target) return;
+
+    // Determine start time and duration
+    const startTime = direction === "up" ? target.startTime : selected.startTime;
+    const endEvent = direction === "up" ? selected : target;
+    let duration: number | undefined;
+    if (startTime && endEvent.startTime && endEvent.duration) {
+      const [sh, sm] = startTime.split(":").map(Number);
+      const [eh, em] = endEvent.startTime.split(":").map(Number);
+      duration = (eh * 60 + em) - (sh * 60 + sm) + endEvent.duration;
+    } else if (selected.duration && target.duration) {
+      duration = selected.duration + target.duration;
+    }
+
+    // Move attachments from target to selected event in IndexedDB
+    const targetAtts = await dbLoadAttachments(target.id);
+    if (targetAtts.length > 0) {
+      await dbSaveAttachments(selectedEventId, targetAtts);
+    }
+    await dbRemoveAttachmentsForEvent(target.id);
+
+    // Merge in-memory attachment refs
+    const mergedAttachments = [
+      ...(selected.attachments || []),
+      ...(target.attachments || []),
+    ];
+
+    // Merge notes
+    const mergedNotes = [selected.notes, target.notes].filter(Boolean).join("\n\n") || undefined;
+
+    // Update the selected event
+    const updates: Partial<AppEvent> = {
+      startTime,
+      ...(duration ? { duration } : {}),
+      attachments: mergedAttachments,
+      notes: mergedNotes,
+    };
+    updateEvent(selectedEventId, updates);
+
+    // Remove the consumed event
+    setEvents((prev) => {
+      const updated = prev
+        .map((ev) => ev.id === selectedEventId ? { ...ev, ...updates } : ev)
+        .filter((ev) => ev.id !== target!.id);
+      saveEvents(updated.map((ev) => ({
+        ...ev,
+        attachments: (ev.attachments || []).map(({ dataUrl, ...rest }) => ({ ...rest, dataUrl: "" })),
+      })));
+      return updated;
+    });
+  }, [selectedEventId, events]);
+
+  // Keyboard shortcuts: Cmd+A (assign), Cmd+Up/Down (merge)
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.key === "a" && selectedEventId) {
-        const tag = (e.target as HTMLElement).tagName;
-        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (!(e.metaKey || e.ctrlKey) || !selectedEventId) return;
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+
+      if (e.key === "a") {
         e.preventDefault();
         setShowQuickAssign(true);
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        handleMerge("up");
+      } else if (e.key === "ArrowDown") {
+        e.preventDefault();
+        handleMerge("down");
       }
     }
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [selectedEventId]);
+  }, [selectedEventId, handleMerge]);
 
   if (!mounted) return null;
 
