@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect, useCallback } from "react";
 import { importParsedSegments, importFromText, addEvent } from "@/lib/event-store";
 import { srtToSegments, ParsedTranscript } from "@/lib/srt-parser";
 import { AppEvent, Attachment, Client } from "@/lib/types";
@@ -81,6 +81,62 @@ export default function ImportButton({
   const [excludedPhotos, setExcludedPhotos] = useState<Set<number>>(new Set());
   const [fallbackLocation, setFallbackLocation] = useState<GpsCoords | null>(null);
   const [locationStatus, setLocationStatus] = useState<"idle" | "loading" | "granted" | "denied">("idle");
+
+  // Global paste handler for images
+  const handleGlobalPaste = useCallback((e: ClipboardEvent) => {
+    // Skip if user is typing in an input/textarea (unless it's our paste area)
+    const target = e.target as HTMLElement;
+    if (target.tagName === "INPUT" || (target.tagName === "TEXTAREA" && target !== pasteRef.current)) return;
+
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    const imageFiles: File[] = [];
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.startsWith("image/")) {
+        const file = items[i].getAsFile();
+        if (file) imageFiles.push(file);
+      }
+    }
+
+    if (imageFiles.length > 0) {
+      e.preventDefault();
+      // Create a FileList-like object via DataTransfer
+      const dt = new DataTransfer();
+      imageFiles.forEach(f => dt.items.add(f));
+      setPendingImageFiles(dt.files);
+      setPhotoStep("config");
+    }
+  }, []);
+
+  useEffect(() => {
+    document.addEventListener("paste", handleGlobalPaste);
+    return () => document.removeEventListener("paste", handleGlobalPaste);
+  }, [handleGlobalPaste]);
+
+  // Handle paste in the paste textarea — check for images first
+  function handlePasteAreaPaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    const imageFiles: File[] = [];
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.startsWith("image/")) {
+        const file = items[i].getAsFile();
+        if (file) imageFiles.push(file);
+      }
+    }
+
+    if (imageFiles.length > 0) {
+      e.preventDefault();
+      const dt = new DataTransfer();
+      imageFiles.forEach(f => dt.items.add(f));
+      setPendingImageFiles(dt.files);
+      setShowPasteArea(false);
+      setPhotoStep("config");
+    }
+    // Otherwise let normal text paste proceed
+  }
 
   function todayStr() {
     const d = new Date();
@@ -545,12 +601,13 @@ export default function ImportButton({
         <div className="fixed top-14 left-0 right-0 z-40 bg-surface border-b border-border shadow-lg p-4">
           <div className="max-w-2xl mx-auto">
             <p className="text-sm text-muted mb-2">
-              Paste your SRT, JSON, or transcript text:
+              Paste text (SRT, JSON, transcript) or photos:
             </p>
             <textarea
               ref={pasteRef}
               autoFocus
-              placeholder="Tap here, then paste your SRT, JSON, or transcript text..."
+              onPaste={handlePasteAreaPaste}
+              placeholder="Paste text (SRT, JSON, transcript) or images..."
               className="w-full h-32 p-3 border border-border rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent"
             />
             <div className="flex gap-2 mt-2 justify-end">
