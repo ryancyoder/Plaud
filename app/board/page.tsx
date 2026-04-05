@@ -744,7 +744,8 @@ function ClientTimeline({ client, events: clientEvents }: { client: Client; even
     // Auto-seed site-visit from appointmentDate if not already present
     if (client.appointmentDate && !stored.some((e) => e.type === "site-visit" && e.auto)) {
       const apptDate = client.appointmentDate.includes("T") ? client.appointmentDate.split("T")[0] : client.appointmentDate;
-      addEvent({ type: "site-visit", clientId: client.id, date: apptDate, label: "Site Visit", auto: true });
+      const lastName = getLastName(client.name).toUpperCase();
+      addEvent({ type: "site-visit", clientId: client.id, date: apptDate, label: `${lastName} - Sales Appointment`, auto: true });
       setLocalEvents(getEventsForClient(client.id));
     } else {
       setLocalEvents(stored);
