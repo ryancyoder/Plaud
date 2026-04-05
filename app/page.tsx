@@ -26,7 +26,7 @@ import ImportButton from "@/components/ImportButton";
 import SettingsModal from "@/components/SettingsModal";
 import NavButtons from "@/components/NavButtons";
 
-type SidebarTab = "calendar" | "contacts";
+type SidebarTab = "week" | "contacts" | "projects";
 
 function todayDateStr(): string {
   const d = new Date();
@@ -39,7 +39,7 @@ export default function Dashboard() {
   const [clients, setClients] = useState<Client[]>([]);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [selectedDate, setSelectedDate] = useState(todayDateStr());
-  const [sidebarTab, setSidebarTab] = useState<SidebarTab>("calendar");
+  const [sidebarTab, setSidebarTab] = useState<SidebarTab>("week");
 
   const [showSettings, setShowSettings] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -53,7 +53,7 @@ export default function Dashboard() {
   // Determine viewer mode
   const viewerMode = useMemo(() => {
     if (selectedEventId && selectedEvent) return "event" as const;
-    if (sidebarTab === "contacts" && selectedClient) return "client-aggregate" as const;
+    if ((sidebarTab === "contacts" || sidebarTab === "projects") && selectedClient) return "client-aggregate" as const;
     return "day-aggregate" as const;
   }, [selectedEventId, selectedEvent, sidebarTab, selectedClient]);
 
@@ -111,7 +111,7 @@ export default function Dashboard() {
 
   // Center panel events depend on active sidebar tab
   const centerPanelEvents = useMemo(() => {
-    if (sidebarTab === "contacts" && selectedClient) {
+    if ((sidebarTab === "contacts" || sidebarTab === "projects") && selectedClient) {
       return events.filter(
         (ev) =>
           ev.clientId === selectedClient.id ||
@@ -343,7 +343,7 @@ export default function Dashboard() {
               <circle cx="12" cy="12" r="3" />
             </svg>
           </button>
-          <ImportButton onImport={handleImport} events={events} clients={clients} onPhotosMatched={handleBatchPhotos} onPhotoEventsCreated={(created) => setEvents((prev) => [...prev, ...created])} onNavigateToEvent={(eventId, date) => { setSelectedDate(date); setSidebarTab("calendar"); setSelectedEventId(eventId); }} />
+          <ImportButton onImport={handleImport} events={events} clients={clients} onPhotosMatched={handleBatchPhotos} onPhotoEventsCreated={(created) => setEvents((prev) => [...prev, ...created])} onNavigateToEvent={(eventId, date) => { setSelectedDate(date); setSidebarTab("week"); setSelectedEventId(eventId); }} />
           {events.length > 0 && (
             <button
               onClick={handleClearData}
@@ -360,50 +360,50 @@ export default function Dashboard() {
         {/* Left: Sidebar with tab toggle */}
         <div className="w-56 shrink-0 border-r border-border overflow-hidden flex flex-col">
           <div className="shrink-0 flex border-b border-border">
-            <button
-              onClick={() => handleSwitchTab("calendar")}
-              className={`flex-1 py-2 text-center text-xs font-medium transition-colors relative ${
-                sidebarTab === "calendar" ? "text-accent" : "text-muted hover:text-foreground"
-              }`}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="inline-block mr-1 -mt-0.5">
-                <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-                <line x1="16" y1="2" x2="16" y2="6" />
-                <line x1="8" y1="2" x2="8" y2="6" />
-                <line x1="3" y1="10" x2="21" y2="10" />
-              </svg>
-              Week
-              {sidebarTab === "calendar" && <div className="absolute bottom-0 left-2 right-2 h-0.5 bg-accent rounded-full" />}
-            </button>
-            <button
-              onClick={() => handleSwitchTab("contacts")}
-              className={`flex-1 py-2 text-center text-xs font-medium transition-colors relative ${
-                sidebarTab === "contacts" ? "text-accent" : "text-muted hover:text-foreground"
-              }`}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="inline-block mr-1 -mt-0.5">
-                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-                <circle cx="12" cy="7" r="4" />
-              </svg>
-              Contacts
-              {sidebarTab === "contacts" && <div className="absolute bottom-0 left-2 right-2 h-0.5 bg-accent rounded-full" />}
-            </button>
+            {([
+              { key: "week" as SidebarTab, label: "Week", icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="inline-block mr-0.5 -mt-0.5"><rect x="3" y="4" width="18" height="18" rx="2" ry="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg> },
+              { key: "contacts" as SidebarTab, label: "Contacts", icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="inline-block mr-0.5 -mt-0.5"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></svg> },
+              { key: "projects" as SidebarTab, label: "Projects", icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="inline-block mr-0.5 -mt-0.5"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" /></svg> },
+            ]).map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => handleSwitchTab(tab.key)}
+                className={`flex-1 py-2 text-center text-[10px] font-medium transition-colors relative ${
+                  sidebarTab === tab.key ? "text-accent" : "text-muted hover:text-foreground"
+                }`}
+              >
+                {tab.icon}
+                {tab.label}
+                {sidebarTab === tab.key && <div className="absolute bottom-0 left-2 right-2 h-0.5 bg-accent rounded-full" />}
+              </button>
+            ))}
           </div>
 
           <div className="flex-1 overflow-hidden">
-            {sidebarTab === "calendar" ? (
+            {sidebarTab === "week" && (
               <WeekNav
                 selectedDate={selectedDate}
                 onSelectDate={handleSelectDate}
                 getRecordingsForDate={getRecordingsForDate}
               />
-            ) : (
+            )}
+            {sidebarTab === "contacts" && (
               <ClientRoster
-                clients={clients}
+                clients={clients.filter((c) => c.kind !== "project")}
                 selectedClientId={selectedClient?.id || null}
                 onSelectClient={handleSelectClient}
                 onClientsChange={handleClientsChange}
                 transcriptCountByClient={eventCountByClient}
+              />
+            )}
+            {sidebarTab === "projects" && (
+              <ClientRoster
+                clients={clients.filter((c) => c.kind === "project")}
+                selectedClientId={selectedClient?.id || null}
+                onSelectClient={handleSelectClient}
+                onClientsChange={handleClientsChange}
+                transcriptCountByClient={eventCountByClient}
+                mode="projects"
               />
             )}
           </div>
@@ -412,7 +412,7 @@ export default function Dashboard() {
         {/* Center: Event List */}
         <div className="flex-1 flex flex-col overflow-hidden border-r border-border">
           <EventListPanel
-            mode={sidebarTab === "contacts" && selectedClient ? "client" : "date"}
+            mode={(sidebarTab === "contacts" || sidebarTab === "projects") && selectedClient ? "client" : "date"}
             date={selectedDate}
             client={selectedClient}
             events={centerPanelEvents}

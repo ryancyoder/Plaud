@@ -1,11 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { Client, ClientKind } from "@/lib/types";
+import { Client, ClientKind, ContactSubtype, CONTACT_SUBTYPES } from "@/lib/types";
 import { addClient, deleteClient } from "@/lib/clients";
 import { getLastName } from "@/lib/utils";
-
-type SubTab = "contacts" | "projects";
 
 interface ClientRosterProps {
   clients: Client[];
@@ -13,6 +11,7 @@ interface ClientRosterProps {
   onSelectClient: (client: Client | null) => void;
   onClientsChange: () => void;
   transcriptCountByClient: Record<string, number>;
+  mode?: "contacts" | "projects";
 }
 
 export default function ClientRoster({
@@ -21,12 +20,12 @@ export default function ClientRoster({
   onSelectClient,
   onClientsChange,
   transcriptCountByClient,
+  mode = "contacts",
 }: ClientRosterProps) {
-  const [subTab, setSubTab] = useState<SubTab>("contacts");
   const [showAdd, setShowAdd] = useState(false);
   const [newName, setNewName] = useState("");
   const [newCompany, setNewCompany] = useState("");
-  const [newKind, setNewKind] = useState<ClientKind>("client");
+  const [newSubtype, setNewSubtype] = useState<ContactSubtype>("client");
   const [search, setSearch] = useState("");
 
   const sorted = [...clients].sort((a, b) => getLastName(a.name).localeCompare(getLastName(b.name)));
@@ -38,14 +37,13 @@ export default function ClientRoster({
       )
     : sorted;
 
-  const clientList = filtered.filter((c) => (c.kind || c.type) === "client");
-  const contactList = filtered.filter((c) => (c.kind || c.type) === "contact");
-  const projectList = filtered.filter((c) => c.kind === "project");
-
   function handleAdd() {
     if (!newName.trim()) return;
-    const kind = subTab === "projects" ? "project" : newKind;
-    addClient(newName.trim(), newCompany.trim() || undefined, kind);
+    if (mode === "projects") {
+      addClient(newName.trim(), { kind: "project" });
+    } else {
+      addClient(newName.trim(), { company: newCompany.trim() || undefined, kind: "contact", contactSubtype: newSubtype });
+    }
     setNewName("");
     setNewCompany("");
     setShowAdd(false);
@@ -58,31 +56,25 @@ export default function ClientRoster({
     onClientsChange();
   }
 
+  const isProjects = mode === "projects";
+
+  // Group contacts by subtype
+  const subtypeGroups = isProjects ? [] : CONTACT_SUBTYPES
+    .map((st) => ({
+      ...st,
+      items: filtered.filter((c) => (c.contactSubtype || "client") === st.key),
+    }))
+    .filter((g) => g.items.length > 0);
+
   return (
     <div className="flex flex-col h-full bg-surface">
       {/* Header */}
       <div className="shrink-0 px-3 py-2.5 border-b border-border">
-        {/* Sub-tabs */}
-        <div className="flex items-center gap-1 mb-2">
-          <button
-            onClick={() => setSubTab("contacts")}
-            className={`flex-1 py-1 text-[10px] font-semibold rounded-lg transition-colors ${
-              subTab === "contacts" ? "bg-accent text-white" : "text-muted hover:bg-gray-100"
-            }`}
-          >
-            Contacts
-          </button>
-          <button
-            onClick={() => setSubTab("projects")}
-            className={`flex-1 py-1 text-[10px] font-semibold rounded-lg transition-colors ${
-              subTab === "projects" ? "bg-accent text-white" : "text-muted hover:bg-gray-100"
-            }`}
-          >
-            Projects
-          </button>
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="text-sm font-bold">{isProjects ? "Projects" : "Contacts"}</h2>
           <button
             onClick={() => setShowAdd(!showAdd)}
-            className="w-6 h-6 rounded-full bg-accent text-white flex items-center justify-center text-sm hover:bg-blue-600 active:scale-95 shrink-0"
+            className="w-6 h-6 rounded-full bg-accent text-white flex items-center justify-center text-sm hover:bg-blue-600 active:scale-95"
           >
             +
           </button>
@@ -101,14 +93,14 @@ export default function ClientRoster({
         <div className="shrink-0 px-3 py-2 border-b border-border bg-gray-50 space-y-1.5">
           <input
             type="text"
-            placeholder={subTab === "projects" ? "Project name" : "Name"}
+            placeholder={isProjects ? "Project name" : "Name"}
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
             autoFocus
             onKeyDown={(e) => { if (e.key === "Enter") handleAdd(); }}
             className="w-full px-2.5 py-1.5 text-xs border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-accent"
           />
-          {subTab === "contacts" && (
+          {!isProjects && (
             <>
               <input
                 type="text"
@@ -117,23 +109,18 @@ export default function ClientRoster({
                 onChange={(e) => setNewCompany(e.target.value)}
                 className="w-full px-2.5 py-1.5 text-xs border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-accent"
               />
-              <div className="flex gap-1.5">
-                <button
-                  onClick={() => setNewKind("client")}
-                  className={`flex-1 py-1 text-[10px] font-medium rounded ${
-                    newKind === "client" ? "bg-accent text-white" : "bg-gray-200 text-muted"
-                  }`}
-                >
-                  Client
-                </button>
-                <button
-                  onClick={() => setNewKind("contact")}
-                  className={`flex-1 py-1 text-[10px] font-medium rounded ${
-                    newKind === "contact" ? "bg-accent text-white" : "bg-gray-200 text-muted"
-                  }`}
-                >
-                  Contact
-                </button>
+              <div className="flex gap-1 flex-wrap">
+                {CONTACT_SUBTYPES.map((st) => (
+                  <button
+                    key={st.key}
+                    onClick={() => setNewSubtype(st.key)}
+                    className={`px-2 py-0.5 text-[10px] font-medium rounded ${
+                      newSubtype === st.key ? "bg-accent text-white" : "bg-gray-200 text-muted"
+                    }`}
+                  >
+                    {st.label}
+                  </button>
+                ))}
               </div>
             </>
           )}
@@ -164,60 +151,16 @@ export default function ClientRoster({
               : "text-foreground hover:bg-gray-50"
           }`}
         >
-          {subTab === "contacts" ? "All Recordings" : "All Projects"}
+          {isProjects ? "All Projects" : "All Contacts"}
         </button>
       </div>
 
       {/* List */}
       <div className="flex-1 overflow-y-auto px-2 py-1">
-        {subTab === "contacts" ? (
+        {isProjects ? (
           <>
-            {clientList.length > 0 && (
-              <>
-                <div className="text-[9px] uppercase text-muted font-semibold tracking-wider px-2.5 pt-2 pb-1">
-                  Clients ({clientList.length})
-                </div>
-                {clientList.map((client) => (
-                  <ClientRow
-                    key={client.id}
-                    client={client}
-                    isSelected={selectedClientId === client.id}
-                    count={transcriptCountByClient[client.id] || 0}
-                    onSelect={() => onSelectClient(client)}
-                    onDelete={() => handleDelete(client.id)}
-                  />
-                ))}
-              </>
-            )}
-
-            {contactList.length > 0 && (
-              <>
-                <div className="text-[9px] uppercase text-muted font-semibold tracking-wider px-2.5 pt-3 pb-1">
-                  Contacts ({contactList.length})
-                </div>
-                {contactList.map((client) => (
-                  <ClientRow
-                    key={client.id}
-                    client={client}
-                    isSelected={selectedClientId === client.id}
-                    count={transcriptCountByClient[client.id] || 0}
-                    onSelect={() => onSelectClient(client)}
-                    onDelete={() => handleDelete(client.id)}
-                  />
-                ))}
-              </>
-            )}
-
-            {clientList.length === 0 && contactList.length === 0 && (
-              <div className="text-xs text-gray-300 text-center py-8">
-                {search ? "No matches" : "No clients yet"}
-              </div>
-            )}
-          </>
-        ) : (
-          <>
-            {projectList.length > 0 ? (
-              projectList.map((project) => (
+            {filtered.length > 0 ? (
+              filtered.map((project) => (
                 <ClientRow
                   key={project.id}
                   client={project}
@@ -225,11 +168,38 @@ export default function ClientRoster({
                   count={transcriptCountByClient[project.id] || 0}
                   onSelect={() => onSelectClient(project)}
                   onDelete={project.id === "project-inbox" ? undefined : () => handleDelete(project.id)}
+                  isProject
                 />
               ))
             ) : (
               <div className="text-xs text-gray-300 text-center py-8">
                 {search ? "No matches" : "No projects yet"}
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            {subtypeGroups.length > 0 ? (
+              subtypeGroups.map((group) => (
+                <div key={group.key}>
+                  <div className="text-[9px] uppercase text-muted font-semibold tracking-wider px-2.5 pt-2.5 pb-1">
+                    {group.label} ({group.items.length})
+                  </div>
+                  {group.items.map((client) => (
+                    <ClientRow
+                      key={client.id}
+                      client={client}
+                      isSelected={selectedClientId === client.id}
+                      count={transcriptCountByClient[client.id] || 0}
+                      onSelect={() => onSelectClient(client)}
+                      onDelete={() => handleDelete(client.id)}
+                    />
+                  ))}
+                </div>
+              ))
+            ) : (
+              <div className="text-xs text-gray-300 text-center py-8">
+                {search ? "No matches" : "No contacts yet"}
               </div>
             )}
           </>
@@ -245,25 +215,26 @@ function ClientRow({
   count,
   onSelect,
   onDelete,
+  isProject,
 }: {
   client: Client;
   isSelected: boolean;
   count: number;
   onSelect: () => void;
   onDelete?: () => void;
+  isProject?: boolean;
 }) {
-  const kind = client.kind || client.type;
-  const avatarColor = kind === "project"
-    ? "bg-emerald-100 text-emerald-700"
-    : kind === "client"
-    ? "bg-blue-100 text-blue-700"
-    : "bg-gray-100 text-gray-600";
+  const subtypeColors: Record<ContactSubtype, string> = {
+    client: "bg-blue-100 text-blue-700",
+    rlm: "bg-purple-100 text-purple-700",
+    supplier: "bg-orange-100 text-orange-700",
+    family: "bg-pink-100 text-pink-700",
+    other: "bg-gray-100 text-gray-600",
+  };
 
-  const avatarIcon = kind === "project" ? (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-    </svg>
-  ) : null;
+  const avatarColor = isProject
+    ? "bg-emerald-100 text-emerald-700"
+    : subtypeColors[client.contactSubtype || "client"];
 
   return (
     <div
@@ -274,17 +245,23 @@ function ClientRow({
     >
       {/* Avatar */}
       <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0 ${avatarColor}`}>
-        {avatarIcon || client.name.charAt(0).toUpperCase()}
+        {isProject ? (
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+          </svg>
+        ) : (
+          client.name.charAt(0).toUpperCase()
+        )}
       </div>
 
       {/* Info */}
       <div className="flex-1 min-w-0">
-        <div className="text-xs font-medium truncate">{kind === "project" ? client.name : getLastName(client.name)}</div>
+        <div className="text-xs font-medium truncate">{isProject ? client.name : getLastName(client.name)}</div>
         {client.company && (
           <div className="text-[10px] text-muted truncate">{client.company}</div>
         )}
-        {kind === "project" && client.projectStatus && (
-          <div className="text-[10px] text-muted truncate capitalize">{client.projectStatus.replace("-", " ")}</div>
+        {isProject && client.projectStatus && (
+          <div className="text-[10px] text-muted truncate capitalize">{client.projectStatus.replace(/-/g, " ")}</div>
         )}
       </div>
 

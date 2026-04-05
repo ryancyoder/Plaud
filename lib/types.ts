@@ -110,11 +110,22 @@ export const PROJECT_STATUSES: { key: ProjectStatus; label: string; color: strin
 
 export type ClientKind = "client" | "contact" | "project";
 
+export type ContactSubtype = "client" | "rlm" | "supplier" | "family" | "other";
+
+export const CONTACT_SUBTYPES: { key: ContactSubtype; label: string }[] = [
+  { key: "client", label: "Client" },
+  { key: "rlm", label: "RLM" },
+  { key: "supplier", label: "Supplier" },
+  { key: "family", label: "Family" },
+  { key: "other", label: "Other" },
+];
+
 export interface Client {
   id: string;
   name: string;
   company?: string;
   kind: ClientKind;
+  contactSubtype?: ContactSubtype;
   type: "client" | "contact"; // legacy — use `kind` instead
   status?: ClientStatus;
   projectStatus?: ProjectStatus;

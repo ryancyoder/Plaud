@@ -1,6 +1,6 @@
 "use client";
 
-import { Client, ClientKind, ClientStatus } from "./types";
+import { Client, ClientKind, ClientStatus, ContactSubtype } from "./types";
 
 const CLIENTS_KEY = "plaud-clients";
 
@@ -16,11 +16,15 @@ export function loadClients(): Client[] {
   const stored = localStorage.getItem(CLIENTS_KEY);
   const clients: Client[] = stored ? JSON.parse(stored) : [];
 
-  // Migrate: ensure every record has `kind`
+  // Migrate: ensure every record has `kind` and contacts have `contactSubtype`
   let dirty = false;
   for (const c of clients) {
     if (!c.kind) {
       c.kind = c.type === "contact" ? "contact" : "client";
+      dirty = true;
+    }
+    if (c.kind === "contact" && !c.contactSubtype) {
+      c.contactSubtype = "client";
       dirty = true;
     }
   }
@@ -49,16 +53,21 @@ function generateId(): string {
   return `c-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export function addClient(name: string, company?: string, kind: ClientKind = "client"): Client {
+export function addClient(
+  name: string,
+  opts?: { company?: string; kind?: ClientKind; contactSubtype?: ContactSubtype },
+): Client {
   const clients = loadClients();
   const existing = clients.find((c) => c.name.toLowerCase() === name.toLowerCase());
   if (existing) return existing;
 
+  const kind = opts?.kind ?? "contact";
   const client: Client = {
     id: generateId(),
     name,
-    company,
+    company: opts?.company,
     kind,
+    contactSubtype: kind === "contact" ? (opts?.contactSubtype ?? "client") : undefined,
     type: kind === "contact" ? "contact" : "client", // legacy compat
     ...(kind === "project" ? { projectStatus: "to-do" as const } : {}),
   };
