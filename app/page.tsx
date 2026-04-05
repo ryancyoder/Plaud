@@ -343,7 +343,7 @@ export default function Dashboard() {
               <circle cx="12" cy="12" r="3" />
             </svg>
           </button>
-          <ImportButton onImport={handleImport} events={events} clients={clients} onPhotosMatched={handleBatchPhotos} onPhotoEventsCreated={(created) => setEvents((prev) => [...prev, ...created])} />
+          <ImportButton onImport={handleImport} events={events} clients={clients} onPhotosMatched={handleBatchPhotos} onPhotoEventsCreated={(created) => setEvents((prev) => [...prev, ...created])} onNavigateToEvent={(eventId, date) => { setSelectedDate(date); setSidebarTab("calendar"); setSelectedEventId(eventId); }} />
           {events.length > 0 && (
             <button
               onClick={handleClearData}

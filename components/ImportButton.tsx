@@ -15,6 +15,7 @@ interface ImportButtonProps {
   clients?: Client[];
   onPhotosMatched?: (results: PhotoMatchResult[]) => void;
   onPhotoEventsCreated?: (events: AppEvent[]) => void;
+  onNavigateToEvent?: (eventId: string, date: string) => void;
 }
 
 export default function ImportButton({
@@ -23,6 +24,7 @@ export default function ImportButton({
   clients = [],
   onPhotosMatched,
   onPhotoEventsCreated,
+  onNavigateToEvent,
 }: ImportButtonProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pasteRef = useRef<HTMLTextAreaElement>(null);
@@ -358,6 +360,19 @@ export default function ImportButton({
   }
 
   function closePhotoModal() {
+    // Navigate to most recent created event before clearing state
+    if (photoResults && onNavigateToEvent) {
+      const allCreated = photoResults.createdEvents;
+      if (allCreated.length > 0) {
+        // Pick the most recent by date/time
+        const sorted = [...allCreated].sort((a, b) => {
+          const cmp = b.date.localeCompare(a.date);
+          if (cmp !== 0) return cmp;
+          return (b.startTime || "").localeCompare(a.startTime || "");
+        });
+        onNavigateToEvent(sorted[0].id, sorted[0].date);
+      }
+    }
     photoThumbnails.forEach(t => URL.revokeObjectURL(t.url));
     setPhotoThumbnails([]);
     setExcludedPhotos(new Set());
