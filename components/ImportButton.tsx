@@ -6,7 +6,12 @@ import { srtToSegments, ParsedTranscript } from "@/lib/srt-parser";
 import { AppEvent, Attachment, Client } from "@/lib/types";
 import { batchMatchPhotos, PhotoMatchResult, PhotoSegment, GpsCoords, reverseGeocode, findClosestClient, findClientByAddress } from "@/lib/photo-matcher";
 import { getLastName } from "@/lib/utils";
-import { saveAttachments as dbSaveAttachments } from "@/lib/attachment-store";
+import {
+  saveAttachments as dbSaveAttachments,
+  loadAttachments as dbLoadAttachments,
+  removeAttachmentsForTranscript as dbRemoveAttachmentsForEvent,
+} from "@/lib/attachment-store";
+import { deleteEvent } from "@/lib/event-store";
 
 interface ImportButtonProps {
   onImport: (events: AppEvent[]) => void;
@@ -16,6 +21,8 @@ interface ImportButtonProps {
   onPhotosMatched?: (results: PhotoMatchResult[]) => void;
   onPhotoEventsCreated?: (events: AppEvent[]) => void;
   onNavigateToEvent?: (eventId: string, date: string) => void;
+  onDeleteEvent?: (eventId: string) => void;
+  onUpdateEvent?: (eventId: string, updates: Partial<AppEvent>) => void;
 }
 
 export default function ImportButton({
@@ -25,6 +32,8 @@ export default function ImportButton({
   onPhotosMatched,
   onPhotoEventsCreated,
   onNavigateToEvent,
+  onDeleteEvent,
+  onUpdateEvent: onUpdateEventProp,
 }: ImportButtonProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pasteRef = useRef<HTMLTextAreaElement>(null);
@@ -387,6 +396,82 @@ export default function ImportButton({
     setFallbackLocation(null);
     setLocationStatus("idle");
     if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  /**
+   * Merge a created photo event into an adjacent event in the results list.
+   * The source event (lacking client/GPS) is consumed into the target.
+   * Target keeps its title, client, and GPS. Source contributes attachments
+   * and extends the time range.
+   */
+  async function handleMergeImportEvent(sourceIdx: number, direction: "up" | "down") {
+    if (!photoResults) return;
+    const list = photoResults.createdEvents;
+    const targetIdx = direction === "up" ? sourceIdx - 1 : sourceIdx + 1;
+    if (targetIdx < 0 || targetIdx >= list.length) return;
+
+    const source = list[sourceIdx];
+    const target = list[targetIdx];
+
+    // Move attachments from source to target in IndexedDB
+    const sourceAtts = await dbLoadAttachments(source.id);
+    if (sourceAtts.length > 0) {
+      await dbSaveAttachments(target.id, sourceAtts);
+    }
+    await dbRemoveAttachmentsForEvent(source.id);
+
+    // Merge in-memory attachments
+    const mergedAttachments = [...(target.attachments || []), ...(source.attachments || [])];
+
+    // Determine merged time range
+    const allStarts = [target.startTime, source.startTime].filter(Boolean) as string[];
+    const allEnds: string[] = [];
+    for (const ev of [target, source]) {
+      if (ev.startTime && ev.duration) {
+        const [h, m] = ev.startTime.split(":").map(Number);
+        const endMin = h * 60 + m + ev.duration;
+        allEnds.push(`${String(Math.floor(endMin / 60)).padStart(2, "0")}:${String(endMin % 60).padStart(2, "0")}`);
+      } else if (ev.startTime) {
+        allEnds.push(ev.startTime);
+      }
+    }
+    const newStart = allStarts.sort()[0] || target.startTime;
+    const newEnd = allEnds.sort().reverse()[0];
+    let newDuration: number | undefined;
+    if (newStart && newEnd) {
+      const [sh, sm] = newStart.split(":").map(Number);
+      const [eh, em] = newEnd.split(":").map(Number);
+      const d = (eh * 60 + em) - (sh * 60 + sm);
+      if (d > 0) newDuration = d;
+    }
+
+    // Update target event in storage
+    const targetUpdates: Partial<AppEvent> = {
+      startTime: newStart,
+      ...(newDuration ? { duration: newDuration } : {}),
+      attachments: mergedAttachments.map(({ dataUrl, ...rest }) => ({ ...rest, dataUrl: "" })),
+    };
+    updateEvent(target.id, targetUpdates);
+
+    // Delete source event from storage
+    deleteEvent(source.id);
+
+    // Update results state
+    const updatedTarget = { ...target, ...targetUpdates, attachments: mergedAttachments };
+    const updatedEvents = list
+      .map((ev, i) => i === targetIdx ? updatedTarget : ev)
+      .filter((_, i) => i !== sourceIdx);
+    const updatedSegments = photoResults.segments.filter((_, i) => i !== sourceIdx);
+
+    setPhotoResults({
+      ...photoResults,
+      createdEvents: updatedEvents,
+      segments: updatedSegments,
+    });
+
+    // Notify parent so dashboard state stays in sync
+    onDeleteEvent?.(source.id);
+    onUpdateEventProp?.(target.id, { ...targetUpdates, attachments: mergedAttachments });
   }
 
   async function confirmStartTime() {
@@ -994,70 +1079,108 @@ export default function ImportButton({
                           const assignedClient = ev.clientId ? clients.find((c) => c.id === ev.clientId) : null;
                           const isUnmatched = !ev.clientId && !photoResults.matched.some(m => m.eventId === ev.id);
                           const currentLabel = editedEventLabels[ev.id] ?? ev.label;
+                          const canMergeUp = idx > 0;
+                          const canMergeDown = idx < photoResults.createdEvents.length - 1;
                           return (
-                            <div key={ev.id} className={`rounded-lg border p-2.5 ${isUnmatched ? "border-amber-300 bg-amber-50" : "border-blue-200 bg-blue-50"}`}>
-                              <div className="flex items-center justify-between mb-1 gap-2">
-                                {isUnmatched ? (
-                                  <input
-                                    type="text"
-                                    value={currentLabel}
-                                    onChange={(e) => {
-                                      const val = e.target.value;
-                                      setEditedEventLabels(prev => ({ ...prev, [ev.id]: val }));
-                                    }}
-                                    onBlur={() => {
-                                      const val = editedEventLabels[ev.id];
-                                      if (val !== undefined && val !== ev.label) {
-                                        updateEvent(ev.id, { label: val });
-                                        ev.label = val;
-                                      }
-                                    }}
-                                    onKeyDown={(e) => {
-                                      if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-                                    }}
-                                    className="flex-1 text-sm font-semibold text-amber-800 bg-white border border-amber-300 rounded px-2 py-0.5 focus:outline-none focus:ring-2 focus:ring-amber-400"
-                                    placeholder="Name this event..."
-                                  />
-                                ) : (
-                                  <span className="text-sm font-semibold text-blue-800">{currentLabel}</span>
-                                )}
-                                <span className="text-xs text-blue-600 shrink-0">{ev.date}</span>
-                              </div>
-                              {isUnmatched && (
-                                <p className="text-[10px] text-amber-600 mb-1.5">No matching client or event — tap to rename</p>
+                            <div key={ev.id} className="flex gap-1.5">
+                              {/* Merge arrows */}
+                              {photoResults.createdEvents.length > 1 && (
+                                <div className="flex flex-col items-center justify-center gap-0.5 shrink-0">
+                                  <button
+                                    onClick={() => handleMergeImportEvent(idx, "up")}
+                                    disabled={!canMergeUp}
+                                    className={`w-6 h-6 rounded flex items-center justify-center text-xs transition-colors ${
+                                      canMergeUp
+                                        ? "bg-gray-200 hover:bg-blue-200 text-gray-600 hover:text-blue-700 active:scale-95"
+                                        : "bg-gray-50 text-gray-300 cursor-not-allowed"
+                                    }`}
+                                    title={canMergeUp ? "Merge into event above" : ""}
+                                  >
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                      <polyline points="18 15 12 9 6 15" />
+                                    </svg>
+                                  </button>
+                                  <button
+                                    onClick={() => handleMergeImportEvent(idx, "down")}
+                                    disabled={!canMergeDown}
+                                    className={`w-6 h-6 rounded flex items-center justify-center text-xs transition-colors ${
+                                      canMergeDown
+                                        ? "bg-gray-200 hover:bg-blue-200 text-gray-600 hover:text-blue-700 active:scale-95"
+                                        : "bg-gray-50 text-gray-300 cursor-not-allowed"
+                                    }`}
+                                    title={canMergeDown ? "Merge into event below" : ""}
+                                  >
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                      <polyline points="6 9 12 15 18 9" />
+                                    </svg>
+                                  </button>
+                                </div>
                               )}
-                              {/* GPS / Location info */}
-                              {seg?.gps ? (
-                                <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
-                                  <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded-full">
-                                    GPS: {seg.gps.lat.toFixed(4)}, {seg.gps.lng.toFixed(4)}
-                                  </span>
-                                  {seg.address && (
-                                    <span className="text-[10px] bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded-full">
-                                      {seg.address}
-                                    </span>
+                              {/* Event card */}
+                              <div className={`flex-1 rounded-lg border p-2.5 ${isUnmatched ? "border-amber-300 bg-amber-50" : "border-blue-200 bg-blue-50"}`}>
+                                <div className="flex items-center justify-between mb-1 gap-2">
+                                  {isUnmatched ? (
+                                    <input
+                                      type="text"
+                                      value={currentLabel}
+                                      onChange={(e) => {
+                                        const val = e.target.value;
+                                        setEditedEventLabels(prev => ({ ...prev, [ev.id]: val }));
+                                      }}
+                                      onBlur={() => {
+                                        const val = editedEventLabels[ev.id];
+                                        if (val !== undefined && val !== ev.label) {
+                                          updateEvent(ev.id, { label: val });
+                                          ev.label = val;
+                                        }
+                                      }}
+                                      onKeyDown={(e) => {
+                                        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                                      }}
+                                      className="flex-1 text-sm font-semibold text-amber-800 bg-white border border-amber-300 rounded px-2 py-0.5 focus:outline-none focus:ring-2 focus:ring-amber-400"
+                                      placeholder="Name this event..."
+                                    />
+                                  ) : (
+                                    <span className="text-sm font-semibold text-blue-800">{currentLabel}</span>
                                   )}
+                                  <span className="text-xs text-blue-600 shrink-0">{ev.date} {ev.startTime || ""}</span>
                                 </div>
-                              ) : (
-                                <div className="mb-1.5">
-                                  <span className="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full">
-                                    No GPS data
-                                  </span>
-                                </div>
-                              )}
-                              {assignedClient && (
-                                <div className="mb-1.5">
-                                  <span className="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full">
-                                    Assigned to {assignedClient.name}
-                                  </span>
-                                </div>
-                              )}
-                              <div className="flex gap-1.5 overflow-x-auto">
-                                {ev.attachments?.map((att) => (
-                                  <div key={att.id} className="shrink-0 w-14 h-14 rounded overflow-hidden border border-blue-200">
-                                    <img src={att.dataUrl} alt={att.name} className="w-full h-full object-cover" />
+                                {isUnmatched && (
+                                  <p className="text-[10px] text-amber-600 mb-1.5">No matching client or event — tap to rename, or merge with adjacent event</p>
+                                )}
+                                {/* GPS / Location info */}
+                                {seg?.gps ? (
+                                  <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+                                    <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded-full">
+                                      GPS: {seg.gps.lat.toFixed(4)}, {seg.gps.lng.toFixed(4)}
+                                    </span>
+                                    {seg.address && (
+                                      <span className="text-[10px] bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded-full">
+                                        {seg.address}
+                                      </span>
+                                    )}
                                   </div>
-                                ))}
+                                ) : (
+                                  <div className="mb-1.5">
+                                    <span className="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full">
+                                      No GPS data
+                                    </span>
+                                  </div>
+                                )}
+                                {assignedClient && (
+                                  <div className="mb-1.5">
+                                    <span className="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full">
+                                      Assigned to {assignedClient.name}
+                                    </span>
+                                  </div>
+                                )}
+                                <div className="flex gap-1.5 overflow-x-auto">
+                                  {ev.attachments?.map((att) => (
+                                    <div key={att.id} className="shrink-0 w-14 h-14 rounded overflow-hidden border border-blue-200">
+                                      <img src={att.dataUrl} alt={att.name} className="w-full h-full object-cover" />
+                                    </div>
+                                  ))}
+                                </div>
                               </div>
                             </div>
                           );
