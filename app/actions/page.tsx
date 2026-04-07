@@ -401,9 +401,9 @@ export default function ActionsPage() {
         <div className="flex-1 overflow-x-auto overflow-y-auto" ref={calendarScrollRef}>
           <div style={{ width: totalDays * CELL_SIZE, minHeight: "100%" }}>
             {/* Calendar header: month names row + day numbers row */}
-            <div className="sticky top-0 z-10 bg-surface border-b border-border">
+            <div className="sticky top-0 z-10 bg-surface border-b border-border overflow-hidden" style={{ height: ROW_HEIGHT }}>
               {/* Month labels row */}
-              <div className="flex" style={{ height: 14 }}>
+              <div className="flex" style={{ height: 13 }}>
                 {(() => {
                   const spans: { month: string; cols: number; startIdx: number }[] = [];
                   for (let i = 0; i < totalDays; i++) {
@@ -428,7 +428,7 @@ export default function ActionsPage() {
                 })()}
               </div>
               {/* Day number row */}
-              <div className="flex" style={{ height: ROW_HEIGHT - 14 }}>
+              <div className="flex" style={{ height: ROW_HEIGHT - 13 - 1 }}>
                 {Array.from({ length: totalDays }, (_, i) => {
                   const date = addDays(calendarStart, i);
                   const isToday = date === today;
