@@ -224,6 +224,17 @@ export default function ActionsPage() {
     return { visibleDates: dates, dateToCol: colMap };
   }, [calendarStart, totalDays, hideWeekends]);
 
+  // Daily total minutes for column header
+  const dailyMinutesMap = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const ev of allEvents) {
+      if (ev.duration && ev.duration > 0) {
+        map.set(ev.date, (map.get(ev.date) || 0) + ev.duration);
+      }
+    }
+    return map;
+  }, [allEvents]);
+
   // Navigate to dashboard with event selected
   const handleEventClick = useCallback((event: AppEvent) => {
     if (event.clientId) {
@@ -523,6 +534,8 @@ export default function ActionsPage() {
                 const d = new Date(date + "T00:00:00");
                 const isFirstOfMonth = d.getDate() === 1;
                 const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+                const dayMin = dailyMinutesMap.get(date) || 0;
+                const dayHrs = dayMin / 60;
                 return (
                   <div
                     key={date}
@@ -530,9 +543,12 @@ export default function ActionsPage() {
                       isToday ? "bg-accent/10 text-accent" : isWeekend ? "bg-gray-50 text-gray-400" : "text-foreground"
                     }`}
                     style={{ width: CELL_SIZE }}
-                    title={date}
+                    title={`${date}${dayMin ? ` — ${dayHrs.toFixed(1)}h` : ""}`}
                   >
                     <span className="text-[10px] font-bold leading-none">{isFirstOfMonth ? `${d.getMonth() + 1}/1` : d.getDate()}</span>
+                    {dayMin > 0 && (
+                      <span className="text-[7px] leading-none mt-0.5 text-muted font-medium">{dayHrs < 10 ? dayHrs.toFixed(1) : Math.round(dayHrs)}</span>
+                    )}
                   </div>
                 );
               })}
