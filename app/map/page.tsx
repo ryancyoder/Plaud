@@ -83,7 +83,7 @@ export default function MapPage() {
   }, [clients]);
 
   const filteredClients = useMemo(
-    () => clients.filter((c) => activeStatuses.has(c.status || "lead")),
+    () => clients.filter((c) => c.kind !== "project" && activeStatuses.has(c.status || "lead")),
     [clients, activeStatuses],
   );
 
