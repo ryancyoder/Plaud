@@ -416,10 +416,7 @@ export default function ActionsPage() {
                     style={{ width: CELL_SIZE }}
                     title={date}
                   >
-                    {isFirstOfMonth && (
-                      <span className="text-[7px] font-semibold text-muted uppercase leading-none">{d.toLocaleDateString("en-US", { month: "short" })}</span>
-                    )}
-                    <span className="text-[10px] font-bold leading-none">{d.getDate()}</span>
+                    <span className="text-[10px] font-bold leading-none">{isFirstOfMonth ? `${d.getMonth() + 1}/1` : d.getDate()}</span>
                   </div>
                 );
               })}
