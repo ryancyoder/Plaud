@@ -14,6 +14,7 @@ import NavButtons from "@/components/NavButtons";
 
 const ROW_HEIGHT = 36; // px — cells are ROW_HEIGHT x ROW_HEIGHT squares
 const CELL_SIZE = ROW_HEIGHT;
+const HEADER_HEIGHT = ROW_HEIGHT + 14; // calendar header has month row (14px) + day row (ROW_HEIGHT)
 
 // Event type → icon mapping for the timeline
 const EVENT_ICONS: Partial<Record<EventType, { icon: string; color: string; title: string }>> = {
@@ -299,11 +300,11 @@ export default function ActionsPage() {
       <div className="flex-1 flex overflow-hidden">
         {/* Left fixed columns: Client | NextAction | Done */}
         <div ref={leftPanelRef} className="shrink-0 flex flex-col overflow-y-auto border-r-2 border-border" style={{ width: 420 }}>
-          {/* Header row */}
-          <div className="sticky top-0 z-10 bg-surface border-b border-border flex" style={{ height: ROW_HEIGHT }}>
-            <div className="w-36 shrink-0 px-3 flex items-center text-[10px] font-semibold uppercase text-muted">Client</div>
-            <div className="flex-1 px-3 flex items-center text-[10px] font-semibold uppercase text-muted">Next Action</div>
-            <div className="w-12 shrink-0 flex items-center justify-center text-[10px] font-semibold uppercase text-muted">
+          {/* Header row — matches calendar's two-row header height */}
+          <div className="sticky top-0 z-10 bg-surface border-b border-border flex items-end" style={{ height: HEADER_HEIGHT }}>
+            <div className="w-36 shrink-0 px-3 pb-2 text-[10px] font-semibold uppercase text-muted">Client</div>
+            <div className="flex-1 px-3 pb-2 text-[10px] font-semibold uppercase text-muted">Next Action</div>
+            <div className="w-12 shrink-0 flex items-center justify-center pb-2">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12" /></svg>
             </div>
           </div>
@@ -401,9 +402,9 @@ export default function ActionsPage() {
         <div className="flex-1 overflow-x-auto overflow-y-auto" ref={calendarScrollRef}>
           <div style={{ width: totalDays * CELL_SIZE, minHeight: "100%" }}>
             {/* Calendar header: month names row + day numbers row */}
-            <div className="sticky top-0 z-10 bg-surface border-b border-border overflow-hidden" style={{ height: ROW_HEIGHT }}>
+            <div className="sticky top-0 z-10 bg-surface border-b border-border" style={{ height: HEADER_HEIGHT }}>
               {/* Month labels row */}
-              <div className="flex" style={{ height: 13 }}>
+              <div className="flex" style={{ height: 14 }}>
                 {(() => {
                   const spans: { month: string; cols: number; startIdx: number }[] = [];
                   for (let i = 0; i < totalDays; i++) {
@@ -428,7 +429,7 @@ export default function ActionsPage() {
                 })()}
               </div>
               {/* Day number row */}
-              <div className="flex" style={{ height: ROW_HEIGHT - 13 - 1 }}>
+              <div className="flex" style={{ height: ROW_HEIGHT }}>
                 {Array.from({ length: totalDays }, (_, i) => {
                   const date = addDays(calendarStart, i);
                   const isToday = date === today;
@@ -476,7 +477,7 @@ export default function ActionsPage() {
         {/* Right fixed column: Total Hours */}
         <div ref={rightPanelRef} className="shrink-0 flex flex-col overflow-y-auto border-l-2 border-border" style={{ width: 56 }}>
           {/* Header */}
-          <div className="sticky top-0 z-10 bg-surface border-b border-border flex items-center justify-center text-[9px] font-semibold uppercase text-muted" style={{ height: ROW_HEIGHT }}>
+          <div className="sticky top-0 z-10 bg-surface border-b border-border flex items-end justify-center text-[9px] font-semibold uppercase text-muted pb-2" style={{ height: HEADER_HEIGHT }}>
             Hrs
           </div>
 
