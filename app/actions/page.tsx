@@ -9,6 +9,7 @@ import { loadEvents, addEvent } from "@/lib/event-store";
 import { getLastName } from "@/lib/utils";
 import { setPersistedClientId } from "@/lib/selected-client";
 import NavButtons from "@/components/NavButtons";
+import AppNav from "@/components/AppNav";
 
 // --- Constants ---
 
@@ -273,25 +274,7 @@ export default function ActionsPage() {
     <div className="flex flex-col h-screen overflow-hidden bg-background">
       {/* Header */}
       <header className="shrink-0 px-4 py-2 flex items-center justify-between border-b border-border bg-surface">
-        <div className="flex items-center gap-2.5">
-          <Link href="/" className="flex items-center gap-2.5 hover:opacity-80">
-            <div className="w-7 h-7 rounded-lg bg-accent flex items-center justify-center">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
-                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                <line x1="12" x2="12" y1="19" y2="22" />
-              </svg>
-            </div>
-            <h1 className="text-base font-bold tracking-tight">Plaud</h1>
-          </Link>
-        </div>
-        <div className="flex items-center gap-3">
-          <Link href="/" className="px-3 py-1.5 rounded-lg text-xs font-medium text-muted border border-border hover:bg-gray-50 active:scale-95">Dashboard</Link>
-          <Link href="/board" className="px-3 py-1.5 rounded-lg text-xs font-medium text-muted border border-border hover:bg-gray-50 active:scale-95">Board</Link>
-          <Link href="/map" className="px-3 py-1.5 rounded-lg text-xs font-medium text-muted border border-border hover:bg-gray-50 active:scale-95">Map</Link>
-          <Link href="/calendar" className="px-3 py-1.5 rounded-lg text-xs font-medium text-muted border border-border hover:bg-gray-50 active:scale-95">Calendar</Link>
-          <span className="text-sm font-semibold">Actions</span>
-        </div>
+        <AppNav current="/actions" />
         <NavButtons />
       </header>
 

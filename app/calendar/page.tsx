@@ -6,6 +6,7 @@ import { AppEvent, Attachment } from "@/lib/types";
 import { loadEvents } from "@/lib/event-store";
 import { loadAttachments } from "@/lib/attachment-store";
 import NavButtons from "@/components/NavButtons";
+import AppNav from "@/components/AppNav";
 
 const COVER_KEY = "plaud-cover-photos"; // date -> eventId
 
@@ -148,13 +149,7 @@ export default function CalendarPage() {
     <div className="flex flex-col h-screen overflow-hidden bg-background">
       {/* Header */}
       <header className="shrink-0 px-4 py-2 flex items-center justify-between border-b border-border bg-surface">
-        <div className="flex items-center gap-2">
-          <Link href="/" className="text-base font-bold tracking-tight hover:text-accent">Plaud</Link>
-          <Link href="/board" className="px-2.5 py-1 rounded-lg text-[10px] font-medium text-muted border border-border hover:bg-gray-50 active:scale-95">Board</Link>
-          <Link href="/actions" className="px-2.5 py-1 rounded-lg text-[10px] font-medium text-muted border border-border hover:bg-gray-50 active:scale-95">Actions</Link>
-          <Link href="/map" className="px-2.5 py-1 rounded-lg text-[10px] font-medium text-muted border border-border hover:bg-gray-50 active:scale-95">Map</Link>
-          <span className="px-2.5 py-1 rounded-lg text-[10px] font-medium text-accent bg-accent-light border border-accent/20">Calendar</span>
-        </div>
+        <AppNav current="/calendar" />
         <NavButtons />
       </header>
 

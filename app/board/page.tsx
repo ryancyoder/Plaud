@@ -9,6 +9,7 @@ import { formatDuration, getLastName } from "@/lib/utils";
 import Link from "next/link";
 import { getPersistedClientId, setPersistedClientId } from "@/lib/selected-client";
 import NavButtons from "@/components/NavButtons";
+import AppNav from "@/components/AppNav";
 
 export default function BoardPage() {
   const [clients, setClients] = useState<Client[]>([]);
@@ -155,59 +156,19 @@ export default function BoardPage() {
     <div className="flex flex-col h-screen overflow-hidden bg-background">
       {/* Header */}
       <header className="shrink-0 px-4 py-2 flex items-center justify-between border-b border-border bg-surface">
-        <div className="flex items-center gap-2.5">
-          <Link href="/" className="flex items-center gap-2.5 hover:opacity-80">
-            <div className="w-7 h-7 rounded-lg bg-accent flex items-center justify-center">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
-                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                <line x1="12" x2="12" y1="19" y2="22" />
-              </svg>
-            </div>
-            <h1 className="text-base font-bold tracking-tight">Plaud</h1>
-          </Link>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <Link
-            href="/"
-            className="px-3 py-1.5 rounded-lg text-xs font-medium text-muted border border-border hover:bg-gray-50 active:scale-95"
-          >
-            Dashboard
-          </Link>
-          <Link
-            href="/actions"
-            className="px-3 py-1.5 rounded-lg text-xs font-medium text-muted border border-border hover:bg-gray-50 active:scale-95"
-          >
-            Actions
-          </Link>
-          <Link
-            href="/map"
-            className="px-3 py-1.5 rounded-lg text-xs font-medium text-muted border border-border hover:bg-gray-50 active:scale-95"
-          >
-            Map
-          </Link>
-          <Link
-            href="/calendar"
-            className="px-3 py-1.5 rounded-lg text-xs font-medium text-muted border border-border hover:bg-gray-50 active:scale-95"
-          >
-            Calendar
-          </Link>
-          <span className="text-sm font-semibold">Client Board</span>
-        </div>
-
+        <AppNav current="/board" />
         <div className="flex items-center gap-2">
           <NavButtons />
           <button
             onClick={handleClipboardImport}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-accent text-white hover:bg-blue-600 active:scale-95"
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-medium bg-accent text-white hover:bg-blue-600 active:scale-95"
             title="Import client from clipboard (Outlook RFP)"
           >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
               <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
             </svg>
-            Import from Clipboard
+            Import
           </button>
           <span className="text-xs text-muted">
             {clients.length} client{clients.length !== 1 ? "s" : ""}
