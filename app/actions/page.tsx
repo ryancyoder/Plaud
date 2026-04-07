@@ -50,6 +50,20 @@ function daysBetween(a: string, b: string): number {
   return Math.round((db.getTime() - da.getTime()) / (86400000));
 }
 
+function findNearestCol(date: string, dateToCol: Map<string, number>, prefer: "before" | "after"): number {
+  const exact = dateToCol.get(date);
+  if (exact !== undefined) return exact;
+  for (let i = 1; i <= 3; i++) {
+    const d1 = addDays(date, prefer === "before" ? -i : i);
+    const c1 = dateToCol.get(d1);
+    if (c1 !== undefined) return c1;
+    const d2 = addDays(date, prefer === "before" ? i : -i);
+    const c2 = dateToCol.get(d2);
+    if (c2 !== undefined) return c2;
+  }
+  return -1;
+}
+
 export default function ActionsPage() {
   const router = useRouter();
   const [clients, setClients] = useState<Client[]>([]);
@@ -67,6 +81,7 @@ export default function ActionsPage() {
   const syncingScroll = useRef(false);
   const [statusDefaults, setStatusDefaults] = useState<Record<string, number>>({});
   const [calendarMode, setCalendarMode] = useState<"history" | "forecast">("history");
+  const [hideWeekends, setHideWeekends] = useState(false);
 
   useEffect(() => {
     setClients(loadClients());
@@ -75,6 +90,7 @@ export default function ActionsPage() {
       const saved = localStorage.getItem("plaud-action-duration-defaults");
       if (saved) setStatusDefaults(JSON.parse(saved));
     } catch { /* ignore */ }
+    if (localStorage.getItem("plaud-hide-weekends") === "true") setHideWeekends(true);
     setMounted(true);
   }, []);
 
@@ -192,6 +208,22 @@ export default function ActionsPage() {
     return { clientEventsMap: map, calendarStart: start, calendarEnd: end, totalDays: Math.max(total, 7) };
   }, [allEvents, calendarMode]);
 
+  // Visible dates and column mapping (respects hideWeekends)
+  const { visibleDates, dateToCol } = useMemo(() => {
+    const dates: string[] = [];
+    const colMap = new Map<string, number>();
+    for (let i = 0; i < totalDays; i++) {
+      const date = addDays(calendarStart, i);
+      if (hideWeekends) {
+        const dow = new Date(date + "T00:00:00").getDay();
+        if (dow === 0 || dow === 6) continue;
+      }
+      colMap.set(date, dates.length);
+      dates.push(date);
+    }
+    return { visibleDates: dates, dateToCol: colMap };
+  }, [calendarStart, totalDays, hideWeekends]);
+
   // Navigate to dashboard with event selected
   const handleEventClick = useCallback((event: AppEvent) => {
     if (event.clientId) {
@@ -300,6 +332,14 @@ export default function ActionsPage() {
     );
   }, []);
 
+  const toggleHideWeekends = useCallback(() => {
+    setHideWeekends((prev) => {
+      const next = !prev;
+      localStorage.setItem("plaud-hide-weekends", String(next));
+      return next;
+    });
+  }, []);
+
   if (!mounted) return null;
 
   const today = todayStr();
@@ -328,6 +368,14 @@ export default function ActionsPage() {
               Forecast
             </button>
           </div>
+          <button
+            onClick={toggleHideWeekends}
+            className={`px-2.5 py-1 text-[10px] font-medium rounded-lg border transition-colors ${
+              hideWeekends ? "bg-accent text-white border-accent" : "text-muted border-border hover:bg-gray-50"
+            }`}
+          >
+            {hideWeekends ? "Show W/E" : "Hide W/E"}
+          </button>
           <NavButtons />
         </div>
       </header>
@@ -467,11 +515,10 @@ export default function ActionsPage() {
 
         {/* Scrollable calendar grid */}
         <div className="flex-1 overflow-x-auto overflow-y-auto" ref={calendarScrollRef}>
-          <div style={{ width: totalDays * CELL_SIZE, minHeight: "100%" }}>
+          <div style={{ width: visibleDates.length * CELL_SIZE, minHeight: "100%" }}>
             {/* Calendar header: day numbers */}
             <div className="shrink-0 sticky top-0 z-10 bg-surface border-b border-border flex" style={{ height: ROW_HEIGHT, minHeight: ROW_HEIGHT, maxHeight: ROW_HEIGHT }}>
-              {Array.from({ length: totalDays }, (_, i) => {
-                const date = addDays(calendarStart, i);
+              {visibleDates.map((date) => {
                 const isToday = date === today;
                 const d = new Date(date + "T00:00:00");
                 const isFirstOfMonth = d.getDate() === 1;
@@ -503,8 +550,8 @@ export default function ActionsPage() {
                     <TimelineRow
                       key={client.id}
                       events={events}
-                      calendarStart={calendarStart}
-                      totalDays={totalDays}
+                      visibleDates={visibleDates}
+                      dateToCol={dateToCol}
                       today={today}
                       onEventClick={handleEventClick}
                     />
@@ -559,14 +606,14 @@ export default function ActionsPage() {
 
 function TimelineRow({
   events,
-  calendarStart,
-  totalDays,
+  visibleDates,
+  dateToCol,
   today,
   onEventClick,
 }: {
   events: AppEvent[];
-  calendarStart: string;
-  totalDays: number;
+  visibleDates: string[];
+  dateToCol: Map<string, number>;
   today: string;
   onEventClick: (event: AppEvent) => void;
 }) {
@@ -587,10 +634,9 @@ function TimelineRow({
   const isComplete = lastDate != null && events.some((e) => e.type === "payment");
 
   // Line spans from first event to last event (or today if not complete)
-  const lineStartCol = firstDate ? daysBetween(calendarStart, firstDate) : -1;
-  const lineEndCol = firstDate
-    ? daysBetween(calendarStart, isComplete && lastDate ? lastDate : today)
-    : -1;
+  const lineStartCol = firstDate ? findNearestCol(firstDate, dateToCol, "after") : -1;
+  const endDate = isComplete && lastDate ? lastDate : today;
+  const lineEndCol = firstDate ? findNearestCol(endDate, dateToCol, "before") : -1;
 
   return (
     <div className="flex border-b border-border relative" style={{ height: ROW_HEIGHT }}>
@@ -618,9 +664,8 @@ function TimelineRow({
         </div>
       )}
 
-      {/* Day cells with event icons */}
-      {Array.from({ length: totalDays }, (_, i) => {
-        const date = addDays(calendarStart, i);
+      {/* Day cells — no "relative" so backgrounds render behind absolute line/arrow */}
+      {visibleDates.map((date) => {
         const dayEvents = eventsByDate.get(date);
         const isToday = date === today;
         const dayOfWeek = new Date(date + "T00:00:00").getDay();
@@ -629,7 +674,7 @@ function TimelineRow({
         return (
           <div
             key={date}
-            className={`shrink-0 flex items-center justify-center relative ${isToday ? "bg-accent/5" : isWeekend ? "bg-gray-50/80" : ""}`}
+            className={`shrink-0 flex items-center justify-center ${isToday ? "bg-accent/5" : isWeekend ? "bg-gray-50/80" : ""}`}
             style={{ width: CELL_SIZE, height: ROW_HEIGHT }}
           >
             {dayEvents && dayEvents.length > 0 && (

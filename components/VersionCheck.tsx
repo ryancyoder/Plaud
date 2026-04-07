@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 
-const CURRENT_VERSION = "2026-04-07T008";
+const CURRENT_VERSION = "2026-04-07T009";
 const CHECK_INTERVAL = 5 * 60 * 1000; // 5 minutes
 
 export default function VersionCheck() {
