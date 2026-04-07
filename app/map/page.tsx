@@ -6,7 +6,7 @@ import Link from "next/link";
 import { Client, ClientStatus, CLIENT_STATUSES } from "@/lib/types";
 import { loadClients, updateClient } from "@/lib/clients";
 import { forwardGeocode } from "@/lib/photo-matcher";
-import { getLastName } from "@/lib/utils";
+import { getLastName, formatLastFirst } from "@/lib/utils";
 import { STATUS_PIN_COLORS, DEFAULT_PIN_COLOR } from "@/lib/map-utils";
 import { getPersistedClientId, setPersistedClientId } from "@/lib/selected-client";
 import MapSearchOverlay from "@/components/MapSearchOverlay";
@@ -393,7 +393,7 @@ export default function MapPage() {
                           style={{ backgroundColor: color }}
                         />
                         <div className="flex-1 min-w-0">
-                          <div className="text-xs font-medium truncate">{client.name}</div>
+                          <div className="text-xs font-medium truncate">{formatLastFirst(client.name)}</div>
                           {client.company && (
                             <div className="text-[10px] text-gray-400 truncate">{client.company}</div>
                           )}

@@ -72,3 +72,11 @@ export function getLastName(fullName: string): string {
   const parts = fullName.trim().split(/\s+/);
   return parts.length > 1 ? parts[parts.length - 1] : fullName;
 }
+
+export function formatLastFirst(fullName: string): string {
+  const parts = fullName.trim().split(/\s+/);
+  if (parts.length <= 1) return fullName;
+  const last = parts[parts.length - 1];
+  const first = parts.slice(0, -1).join(" ");
+  return `${last}, ${first}`;
+}
