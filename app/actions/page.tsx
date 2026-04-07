@@ -300,7 +300,7 @@ export default function ActionsPage() {
         {/* Left fixed columns: Client | NextAction | Done */}
         <div ref={leftPanelRef} className="shrink-0 flex flex-col overflow-y-auto border-r-2 border-border" style={{ width: 420 }}>
           {/* Header row */}
-          <div className="sticky top-0 z-10 bg-surface border-b border-border flex" style={{ height: ROW_HEIGHT }}>
+          <div className="shrink-0 sticky top-0 z-10 bg-surface border-b border-border flex" style={{ height: ROW_HEIGHT, minHeight: ROW_HEIGHT, maxHeight: ROW_HEIGHT }}>
             <div className="w-36 shrink-0 px-3 flex items-center text-[10px] font-semibold uppercase text-muted">Client</div>
             <div className="flex-1 px-3 flex items-center text-[10px] font-semibold uppercase text-muted">Next Action</div>
             <div className="w-12 shrink-0 flex items-center justify-center text-[10px] font-semibold uppercase text-muted">
@@ -401,7 +401,7 @@ export default function ActionsPage() {
         <div className="flex-1 overflow-x-auto overflow-y-auto" ref={calendarScrollRef}>
           <div style={{ width: totalDays * CELL_SIZE, minHeight: "100%" }}>
             {/* Calendar header: day numbers */}
-            <div className="sticky top-0 z-10 bg-surface border-b border-border flex" style={{ height: ROW_HEIGHT }}>
+            <div className="shrink-0 sticky top-0 z-10 bg-surface border-b border-border flex" style={{ height: ROW_HEIGHT, minHeight: ROW_HEIGHT, maxHeight: ROW_HEIGHT }}>
               {Array.from({ length: totalDays }, (_, i) => {
                 const date = addDays(calendarStart, i);
                 const isToday = date === today;
@@ -449,7 +449,7 @@ export default function ActionsPage() {
         {/* Right fixed column: Total Hours */}
         <div ref={rightPanelRef} className="shrink-0 flex flex-col overflow-y-auto border-l-2 border-border" style={{ width: 56 }}>
           {/* Header */}
-          <div className="sticky top-0 z-10 bg-surface border-b border-border flex items-center justify-center text-[9px] font-semibold uppercase text-muted" style={{ height: ROW_HEIGHT }}>
+          <div className="shrink-0 sticky top-0 z-10 bg-surface border-b border-border flex items-center justify-center text-[9px] font-semibold uppercase text-muted" style={{ height: ROW_HEIGHT, minHeight: ROW_HEIGHT, maxHeight: ROW_HEIGHT }}>
             Hrs
           </div>
 
