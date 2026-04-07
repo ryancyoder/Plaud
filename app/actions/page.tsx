@@ -66,6 +66,7 @@ export default function ActionsPage() {
   const rightPanelRef = useRef<HTMLDivElement>(null);
   const syncingScroll = useRef(false);
   const [statusDefaults, setStatusDefaults] = useState<Record<string, number>>({});
+  const [calendarMode, setCalendarMode] = useState<"history" | "forecast">("history");
 
   useEffect(() => {
     setClients(loadClients());
@@ -77,13 +78,16 @@ export default function ActionsPage() {
     setMounted(true);
   }, []);
 
-  // Scroll calendar to show "today" area on mount
+  // Scroll calendar to show "today" area
   useEffect(() => {
     if (!mounted || !calendarScrollRef.current) return;
     const el = calendarScrollRef.current;
-    // Scroll to end (today is rightmost)
-    el.scrollLeft = el.scrollWidth;
-  }, [mounted, clients.length]);
+    if (calendarMode === "forecast") {
+      el.scrollLeft = 0; // today is at far left
+    } else {
+      el.scrollLeft = el.scrollWidth; // today is at far right
+    }
+  }, [mounted, clients.length, calendarMode]);
 
   // Sync vertical scroll across all three panels
   useEffect(() => {
@@ -161,7 +165,15 @@ export default function ActionsPage() {
       evts.sort((a, b) => a.date.localeCompare(b.date) || (a.startTime || "").localeCompare(b.startTime || ""));
     }
 
-    // Find global min/max dates across all client events
+    if (calendarMode === "forecast") {
+      // Forecast: today at far left, 30 days ahead
+      const start = today;
+      const end = addDays(today, 30);
+      const total = 31;
+      return { clientEventsMap: map, calendarStart: start, calendarEnd: end, totalDays: total };
+    }
+
+    // History: from earliest event to today
     let minDate = today;
     let maxDate = today;
     for (const [, evts] of map) {
@@ -178,7 +190,7 @@ export default function ActionsPage() {
     const total = daysBetween(start, end) + 1;
 
     return { clientEventsMap: map, calendarStart: start, calendarEnd: end, totalDays: Math.max(total, 7) };
-  }, [allEvents]);
+  }, [allEvents, calendarMode]);
 
   // Navigate to dashboard with event selected
   const handleEventClick = useCallback((event: AppEvent) => {
@@ -297,7 +309,27 @@ export default function ActionsPage() {
       {/* Header */}
       <header className="shrink-0 px-4 py-2 flex items-center justify-between border-b border-border bg-surface">
         <AppNav current="/actions" />
-        <NavButtons />
+        <div className="flex items-center gap-2">
+          <div className="flex rounded-lg border border-border overflow-hidden">
+            <button
+              onClick={() => setCalendarMode("history")}
+              className={`px-2.5 py-1 text-[10px] font-medium transition-colors ${
+                calendarMode === "history" ? "bg-accent text-white" : "text-muted hover:bg-gray-50"
+              }`}
+            >
+              History
+            </button>
+            <button
+              onClick={() => setCalendarMode("forecast")}
+              className={`px-2.5 py-1 text-[10px] font-medium transition-colors ${
+                calendarMode === "forecast" ? "bg-accent text-white" : "text-muted hover:bg-gray-50"
+              }`}
+            >
+              Forecast
+            </button>
+          </div>
+          <NavButtons />
+        </div>
       </header>
 
       {/* Main content: fixed left | scrollable calendar | fixed right hours */}
