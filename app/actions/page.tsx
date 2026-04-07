@@ -443,11 +443,12 @@ export default function ActionsPage() {
                 const isToday = date === today;
                 const d = new Date(date + "T00:00:00");
                 const isFirstOfMonth = d.getDate() === 1;
+                const isWeekend = d.getDay() === 0 || d.getDay() === 6;
                 return (
                   <div
                     key={date}
                     className={`shrink-0 flex flex-col items-center justify-center border-r border-gray-100 ${
-                      isToday ? "bg-accent/10 text-accent" : "text-foreground"
+                      isToday ? "bg-accent/10 text-accent" : isWeekend ? "bg-gray-50 text-gray-400" : "text-foreground"
                     }`}
                     style={{ width: CELL_SIZE }}
                     title={date}
@@ -590,11 +591,13 @@ function TimelineRow({
         const date = addDays(calendarStart, i);
         const dayEvents = eventsByDate.get(date);
         const isToday = date === today;
+        const dayOfWeek = new Date(date + "T00:00:00").getDay();
+        const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
 
         return (
           <div
             key={date}
-            className={`shrink-0 flex items-center justify-center relative ${isToday ? "bg-accent/5" : ""}`}
+            className={`shrink-0 flex items-center justify-center relative ${isToday ? "bg-accent/5" : isWeekend ? "bg-gray-50/80" : ""}`}
             style={{ width: CELL_SIZE, height: ROW_HEIGHT }}
           >
             {dayEvents && dayEvents.length > 0 && (
