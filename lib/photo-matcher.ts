@@ -32,6 +32,7 @@ export interface GpsCoords {
 export interface PhotoMetadata {
   timestamp: Date;
   gps: GpsCoords | null;
+  dateSource?: string; // diagnostic: how the date was determined
 }
 
 /**
@@ -42,10 +43,13 @@ export interface PhotoMetadata {
  */
 export async function getPhotoMetadata(file: File): Promise<PhotoMetadata> {
   // Read a shared buffer once for all extraction strategies
-  const scanSize = 512 * 1024;
+  // Use 1MB for HEIC files which may have EXIF deeper in the container
+  const isHeic = file.type === "image/heic" || file.type === "image/heif" ||
+    /\.heic$/i.test(file.name) || /\.heif$/i.test(file.name);
+  const scanSize = isHeic ? 1024 * 1024 : 512 * 1024;
   let sharedBuffer: ArrayBuffer | null = null;
   async function getBuffer(): Promise<ArrayBuffer> {
-    if (!sharedBuffer) sharedBuffer = await file.slice(0, scanSize).arrayBuffer();
+    if (!sharedBuffer) sharedBuffer = await file.slice(0, Math.min(scanSize, file.size)).arrayBuffer();
     return sharedBuffer;
   }
 
@@ -57,6 +61,7 @@ export async function getPhotoMetadata(file: File): Promise<PhotoMetadata> {
       return {
         timestamp: exif.date || new Date(file.lastModified),
         gps: exif.gps,
+        dateSource: exif.date ? "exif" : "exif-gps-only+lastModified",
       };
     }
   } catch {
@@ -68,7 +73,7 @@ export async function getPhotoMetadata(file: File): Promise<PhotoMetadata> {
     try {
       const buffer = await getBuffer();
       const pngDate = parsePngDate(buffer);
-      if (pngDate) return { timestamp: pngDate, gps: null };
+      if (pngDate) return { timestamp: pngDate, gps: null, dateSource: "png-chunk" };
     } catch {
       // fall through
     }
@@ -78,16 +83,40 @@ export async function getPhotoMetadata(file: File): Promise<PhotoMetadata> {
   try {
     const buffer = await getBuffer();
     const xmpDate = parseXmpDate(buffer);
-    if (xmpDate) return { timestamp: xmpDate, gps: null };
+    if (xmpDate) return { timestamp: xmpDate, gps: null, dateSource: "xmp" };
   } catch {
     // fall through
   }
 
   // Strategy 4: Date encoded in filename (screenshots)
   const filenameDate = parseDateFromFilename(file.name);
-  if (filenameDate) return { timestamp: filenameDate, gps: null };
+  if (filenameDate) return { timestamp: filenameDate, gps: null, dateSource: "filename" };
 
-  return { timestamp: new Date(file.lastModified), gps: null };
+  // Strategy 5: For larger files, try reading more data for XMP (HEIC can have metadata deep)
+  if (file.size > scanSize) {
+    try {
+      const fullBuffer = await file.slice(0, Math.min(2 * 1024 * 1024, file.size)).arrayBuffer();
+      const xmpDate = parseXmpDate(fullBuffer);
+      if (xmpDate) return { timestamp: xmpDate, gps: null, dateSource: "xmp-deep" };
+      // Also retry EXIF with more data
+      const exif = parseTiffFromBuffer(fullBuffer);
+      if (exif.date) return { timestamp: exif.date, gps: exif.gps, dateSource: "exif-deep" };
+    } catch {
+      // fall through
+    }
+  }
+
+  // Strategy 6: file.lastModified — but check if it looks like "now" (unreliable temp file)
+  const lastMod = file.lastModified;
+  const ageMs = Date.now() - lastMod;
+  const isRecent = ageMs < 60_000; // within last 60 seconds = likely temp file
+  return {
+    timestamp: new Date(lastMod),
+    gps: null,
+    dateSource: isRecent
+      ? `lastModified-UNRELIABLE(${file.type || "no-type"},${file.name})`
+      : "lastModified",
+  };
 }
 
 /**
@@ -882,12 +911,14 @@ export interface PhotoSegment {
   gps: GpsCoords | null;        // From first photo with GPS in the segment
   address: string | null;        // Reverse-geocoded address (filled by batchMatchPhotos)
   matchedClient: Client | null;  // Auto-matched client (filled by batchMatchPhotos)
+  dateSources?: string[];        // diagnostic: how dates were determined for photos in segment
 }
 
 interface RawPhoto {
   attachment: Attachment;
   timestamp: Date;
   gps: GpsCoords | null;
+  dateSource?: string;
 }
 
 /**
@@ -927,6 +958,7 @@ function buildSegment(photos: RawPhoto[]): PhotoSegment {
   const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   // Use first GPS coordinate found in the segment
   const gps = photos.find((p) => p.gps)?.gps || null;
+  const dateSources = [...new Set(photos.map((p) => p.dateSource).filter(Boolean))] as string[];
   return {
     attachments: photos.map((p) => p.attachment),
     startTime,
@@ -935,6 +967,7 @@ function buildSegment(photos: RawPhoto[]): PhotoSegment {
     gps,
     address: null, // filled in later by batchMatchPhotos
     matchedClient: null, // filled in later
+    dateSources,
   };
 }
 
@@ -1032,7 +1065,7 @@ export async function batchMatchPhotos(
         });
       }
     } else {
-      unmatchedRaw.push({ attachment, timestamp: meta.timestamp, gps: meta.gps });
+      unmatchedRaw.push({ attachment, timestamp: meta.timestamp, gps: meta.gps, dateSource: meta.dateSource });
     }
   }
 

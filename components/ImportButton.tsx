@@ -1233,6 +1233,20 @@ export default function ImportButton({
                                     </span>
                                   </div>
                                 )}
+                                {seg?.dateSources && seg.dateSources.some((s) => s.includes("UNRELIABLE")) && (
+                                  <div className="mb-1.5">
+                                    <span className="text-[10px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded-full font-medium">
+                                      Date may be wrong — no metadata found, using file date
+                                    </span>
+                                  </div>
+                                )}
+                                {seg?.dateSources && (
+                                  <div className="mb-1.5">
+                                    <span className="text-[10px] bg-gray-50 text-gray-400 px-1.5 py-0.5 rounded-full">
+                                      Date from: {seg.dateSources.join(", ")}
+                                    </span>
+                                  </div>
+                                )}
                                 {assignedClient && (
                                   <div className="mb-1.5 flex items-center gap-1.5">
                                     <span className="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full">
