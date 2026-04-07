@@ -526,14 +526,35 @@ export default function ActionsPage() {
 
         {/* Scrollable calendar grid */}
         <div className="flex-1 overflow-x-auto overflow-y-auto" ref={calendarScrollRef}>
-          <div style={{ width: visibleDates.length * CELL_SIZE, minHeight: "100%" }}>
+          <div style={{ width: visibleDates.length * CELL_SIZE, minHeight: "100%" }} className="relative">
+            {/* Full-height column shading (weekends/today) and week boundary lines */}
+            {visibleDates.map((date, i) => {
+              const dow = new Date(date + "T00:00:00").getDay();
+              const isWeekend = dow === 0 || dow === 6;
+              const isToday = date === today;
+              const isWeekBoundary = hideWeekends && dow === 1 && i > 0;
+              if (!isWeekend && !isToday && !isWeekBoundary) return null;
+              return (
+                <div
+                  key={`col-${date}`}
+                  className={`absolute top-0 bottom-0 pointer-events-none ${
+                    isToday ? "bg-accent/5" : isWeekend ? "bg-gray-50" : ""
+                  } ${isWeekBoundary ? "border-l-2 border-gray-300" : ""}`}
+                  style={{ left: i * CELL_SIZE, width: CELL_SIZE }}
+                />
+              );
+            })}
+
+            {/* Content layer — above column backgrounds */}
+            <div className="relative" style={{ zIndex: 1 }}>
             {/* Calendar header: day numbers */}
             <div className="shrink-0 sticky top-0 z-10 bg-surface border-b border-border flex" style={{ height: ROW_HEIGHT, minHeight: ROW_HEIGHT, maxHeight: ROW_HEIGHT }}>
-              {visibleDates.map((date) => {
+              {visibleDates.map((date, i) => {
                 const isToday = date === today;
                 const d = new Date(date + "T00:00:00");
                 const isFirstOfMonth = d.getDate() === 1;
                 const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+                const isWeekBoundary = hideWeekends && d.getDay() === 1 && i > 0;
                 const dayMin = dailyMinutesMap.get(date) || 0;
                 const dayHrs = dayMin / 60;
                 return (
@@ -541,7 +562,7 @@ export default function ActionsPage() {
                     key={date}
                     className={`shrink-0 flex flex-col items-center justify-center border-r border-gray-100 ${
                       isToday ? "bg-accent/10 text-accent" : isWeekend ? "bg-gray-50 text-gray-400" : "text-foreground"
-                    }`}
+                    } ${isWeekBoundary ? "border-l-2 border-l-gray-300" : ""}`}
                     style={{ width: CELL_SIZE }}
                     title={`${date}${dayMin ? ` — ${dayHrs.toFixed(1)}h` : ""}`}
                   >
@@ -569,12 +590,14 @@ export default function ActionsPage() {
                       visibleDates={visibleDates}
                       dateToCol={dateToCol}
                       today={today}
+                      hideWeekends={hideWeekends}
                       onEventClick={handleEventClick}
                     />
                   );
                 })}
               </div>
             ))}
+            </div>{/* end content layer */}
           </div>
         </div>
 
@@ -625,12 +648,14 @@ function TimelineRow({
   visibleDates,
   dateToCol,
   today,
+  hideWeekends,
   onEventClick,
 }: {
   events: AppEvent[];
   visibleDates: string[];
   dateToCol: Map<string, number>;
   today: string;
+  hideWeekends: boolean;
   onEventClick: (event: AppEvent) => void;
 }) {
   // Group events by date
@@ -680,17 +705,16 @@ function TimelineRow({
         </div>
       )}
 
-      {/* Day cells — no "relative" so backgrounds render behind absolute line/arrow */}
-      {visibleDates.map((date) => {
+      {/* Day cells — transparent so full-height column backgrounds show through */}
+      {visibleDates.map((date, i) => {
         const dayEvents = eventsByDate.get(date);
-        const isToday = date === today;
         const dayOfWeek = new Date(date + "T00:00:00").getDay();
-        const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+        const isWeekBoundary = hideWeekends && dayOfWeek === 1 && i > 0;
 
         return (
           <div
             key={date}
-            className={`shrink-0 flex items-center justify-center ${isToday ? "bg-accent/5" : isWeekend ? "bg-gray-50/80" : ""}`}
+            className={`shrink-0 flex items-center justify-center ${isWeekBoundary ? "border-l-2 border-l-gray-300" : ""}`}
             style={{ width: CELL_SIZE, height: ROW_HEIGHT }}
           >
             {dayEvents && dayEvents.length > 0 && (
