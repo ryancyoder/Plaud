@@ -61,6 +61,9 @@ export default function ActionsPage() {
   const inputRef = useRef<HTMLInputElement>(null);
   const nextInputRef = useRef<HTMLInputElement>(null);
   const calendarScrollRef = useRef<HTMLDivElement>(null);
+  const leftPanelRef = useRef<HTMLDivElement>(null);
+  const rightPanelRef = useRef<HTMLDivElement>(null);
+  const syncingScroll = useRef(false);
 
   useEffect(() => {
     setClients(loadClients());
@@ -75,6 +78,35 @@ export default function ActionsPage() {
     // Scroll to end (today is rightmost)
     el.scrollLeft = el.scrollWidth;
   }, [mounted, clients.length]);
+
+  // Sync vertical scroll across all three panels
+  useEffect(() => {
+    const panels = [leftPanelRef.current, calendarScrollRef.current, rightPanelRef.current];
+    if (panels.some((p) => !p)) return;
+
+    function handleScroll(source: HTMLDivElement) {
+      if (syncingScroll.current) return;
+      syncingScroll.current = true;
+      for (const panel of panels) {
+        if (panel && panel !== source) {
+          panel.scrollTop = source.scrollTop;
+        }
+      }
+      syncingScroll.current = false;
+    }
+
+    const listeners = panels.map((panel) => {
+      const handler = () => handleScroll(panel!);
+      panel!.addEventListener("scroll", handler);
+      return { panel: panel!, handler };
+    });
+
+    return () => {
+      for (const { panel, handler } of listeners) {
+        panel.removeEventListener("scroll", handler);
+      }
+    };
+  }, [mounted]);
 
   useEffect(() => {
     if (editingId && inputRef.current) {
@@ -266,7 +298,7 @@ export default function ActionsPage() {
       {/* Main content: fixed left | scrollable calendar | fixed right hours */}
       <div className="flex-1 flex overflow-hidden">
         {/* Left fixed columns: Client | NextAction | Done */}
-        <div className="shrink-0 flex flex-col overflow-y-auto border-r-2 border-border" style={{ width: 420 }}>
+        <div ref={leftPanelRef} className="shrink-0 flex flex-col overflow-y-auto border-r-2 border-border" style={{ width: 420 }}>
           {/* Header row */}
           <div className="sticky top-0 z-10 bg-surface border-b border-border flex" style={{ height: ROW_HEIGHT }}>
             <div className="w-36 shrink-0 px-3 flex items-center text-[10px] font-semibold uppercase text-muted">Client</div>
@@ -442,7 +474,7 @@ export default function ActionsPage() {
         </div>
 
         {/* Right fixed column: Total Hours */}
-        <div className="shrink-0 flex flex-col overflow-y-auto border-l-2 border-border" style={{ width: 56 }}>
+        <div ref={rightPanelRef} className="shrink-0 flex flex-col overflow-y-auto border-l-2 border-border" style={{ width: 56 }}>
           {/* Header */}
           <div className="sticky top-0 z-10 bg-surface border-b border-border flex items-center justify-center text-[9px] font-semibold uppercase text-muted" style={{ height: ROW_HEIGHT }}>
             Hrs
