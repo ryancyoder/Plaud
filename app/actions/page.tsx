@@ -65,10 +65,15 @@ export default function ActionsPage() {
   const leftPanelRef = useRef<HTMLDivElement>(null);
   const rightPanelRef = useRef<HTMLDivElement>(null);
   const syncingScroll = useRef(false);
+  const [statusDefaults, setStatusDefaults] = useState<Record<string, number>>({});
 
   useEffect(() => {
     setClients(loadClients());
     setAllEvents(loadEvents());
+    try {
+      const saved = localStorage.getItem("plaud-action-duration-defaults");
+      if (saved) setStatusDefaults(JSON.parse(saved));
+    } catch { /* ignore */ }
     setMounted(true);
   }, []);
 
@@ -266,6 +271,23 @@ export default function ActionsPage() {
     }
   }, [handleConfirmComplete, handleCancelComplete]);
 
+  const handleSetStatusDefault = useCallback((status: ClientStatus, minutes: number | undefined) => {
+    setStatusDefaults((prev) => {
+      const next = { ...prev };
+      if (minutes === undefined) delete next[status];
+      else next[status] = minutes;
+      localStorage.setItem("plaud-action-duration-defaults", JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
+  const handleSetClientDuration = useCallback((clientId: string, minutes: number | undefined) => {
+    updateClient(clientId, { nextActionDuration: minutes });
+    setClients((prev) =>
+      prev.map((c) => c.id === clientId ? { ...c, nextActionDuration: minutes } : c)
+    );
+  }, []);
+
   if (!mounted) return null;
 
   const today = todayStr();
@@ -281,7 +303,7 @@ export default function ActionsPage() {
       {/* Main content: fixed left | scrollable calendar | fixed right hours */}
       <div className="flex-1 flex overflow-hidden">
         {/* Left fixed columns: Client | NextAction | Done */}
-        <div ref={leftPanelRef} className="shrink-0 flex flex-col overflow-y-auto border-r-2 border-border" style={{ width: 420 }}>
+        <div ref={leftPanelRef} className="shrink-0 flex flex-col overflow-y-auto border-r-2 border-border" style={{ width: 460 }}>
           {/* Header row */}
           <div className="shrink-0 sticky top-0 z-10 bg-surface border-b border-border flex" style={{ height: ROW_HEIGHT, minHeight: ROW_HEIGHT, maxHeight: ROW_HEIGHT }}>
             <div className="w-36 shrink-0 px-3 flex items-center text-[10px] font-semibold uppercase text-muted">Client</div>
@@ -289,6 +311,7 @@ export default function ActionsPage() {
             <div className="w-12 shrink-0 flex items-center justify-center text-[10px] font-semibold uppercase text-muted">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12" /></svg>
             </div>
+            <div className="w-10 shrink-0 flex items-center justify-center text-[9px] font-semibold uppercase text-muted" title="Duration (minutes)">Min</div>
           </div>
 
           {/* Rows */}
@@ -296,10 +319,24 @@ export default function ActionsPage() {
             <div key={group.status}>
               {/* Status group header */}
               <div
-                className={`flex items-center px-3 text-[10px] font-bold uppercase tracking-wider border-b border-t border-border ${group.color}`}
+                className={`flex items-center border-b border-t border-border ${group.color}`}
                 style={{ height: ROW_HEIGHT - 4 }}
               >
-                {group.label} ({group.clients.length})
+                <div className="flex-1 px-3 text-[10px] font-bold uppercase tracking-wider">
+                  {group.label} ({group.clients.length})
+                </div>
+                <div className="w-10 shrink-0 flex items-center justify-center">
+                  <input
+                    type="number"
+                    value={statusDefaults[group.status] ?? ""}
+                    onChange={(e) => {
+                      const val = e.target.value.trim();
+                      handleSetStatusDefault(group.status, val ? parseInt(val) : undefined);
+                    }}
+                    placeholder="—"
+                    className="w-8 text-center text-[9px] font-bold bg-transparent border-none focus:outline-none focus:bg-white/60 rounded placeholder:text-gray-400"
+                  />
+                </div>
               </div>
 
               {group.clients.map((client) => {
@@ -372,6 +409,22 @@ export default function ActionsPage() {
                           </svg>
                         </button>
                       )}
+                    </div>
+
+                    {/* Duration (minutes) */}
+                    <div className="w-10 shrink-0 flex items-center justify-center">
+                      <input
+                        type="number"
+                        value={client.nextActionDuration ?? statusDefaults[client.status || "lead"] ?? ""}
+                        onChange={(e) => {
+                          const val = e.target.value.trim();
+                          handleSetClientDuration(client.id, val ? parseInt(val) : undefined);
+                        }}
+                        placeholder="—"
+                        className={`w-8 text-center text-[9px] bg-transparent border-none focus:outline-none focus:bg-gray-100 rounded placeholder:text-gray-300 ${
+                          client.nextActionDuration != null ? "font-bold text-foreground" : "text-gray-400"
+                        }`}
+                      />
                     </div>
                   </div>
                 );

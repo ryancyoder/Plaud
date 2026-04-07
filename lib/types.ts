@@ -137,4 +137,5 @@ export interface Client {
   notes?: string;
   appointmentDate?: string;
   nextAction?: string;
+  nextActionDuration?: number; // minutes — overrides status default
 }
