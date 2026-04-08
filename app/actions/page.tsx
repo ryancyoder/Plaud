@@ -798,10 +798,10 @@ function TimelineRow({
       {/* Forecast schedule block — rendered first so it paints behind line/dots */}
       {forecastBlock && forecastBlock.width > 0 && (
         <div
-          className="absolute top-1 bottom-1 rounded-sm flex items-center px-1 overflow-hidden cursor-grab active:cursor-grabbing select-none touch-none"
+          className="absolute top-1 bottom-1 rounded-sm flex items-center px-1 cursor-grab active:cursor-grabbing select-none touch-none"
           style={{
             left: forecastBlock.left,
-            width: Math.max(forecastBlock.width, 8),
+            minWidth: Math.max(forecastBlock.width, 8),
             backgroundColor: forecastBlock.color,
             opacity: 0.7,
           }}
@@ -819,7 +819,7 @@ function TimelineRow({
           }}
           onPointerCancel={() => { dragRef.current = null; }}
         >
-          <span className="text-[8px] text-white font-medium truncate whitespace-nowrap">
+          <span className="text-[8px] text-white font-medium whitespace-nowrap">
             {forecastBlock.label}
           </span>
         </div>
