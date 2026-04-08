@@ -801,7 +801,6 @@ function TimelineRow({
           className="absolute top-1 bottom-1 rounded-sm flex items-center px-1 cursor-grab active:cursor-grabbing select-none touch-none"
           style={{
             left: forecastBlock.left,
-            minWidth: Math.max(forecastBlock.width, 8),
             backgroundColor: forecastBlock.color,
             opacity: 0.7,
           }}
