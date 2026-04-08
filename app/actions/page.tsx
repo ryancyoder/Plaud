@@ -227,13 +227,32 @@ export default function ActionsPage() {
   // Daily total minutes for column header
   const dailyMinutesMap = useMemo(() => {
     const map = new Map<string, number>();
+    const todayDate = todayStr();
+
+    // Build client lookup for estimated durations in forecast mode
+    const clientMap = new Map<string, Client>();
+    if (calendarMode === "forecast") {
+      for (const c of clients) clientMap.set(c.id, c);
+    }
+
     for (const ev of allEvents) {
-      if (ev.duration && ev.duration > 0) {
-        map.set(ev.date, (map.get(ev.date) || 0) + ev.duration);
+      let minutes = ev.duration || 0;
+
+      // In forecast mode, future events use estimated duration from Min column
+      if (calendarMode === "forecast" && ev.date >= todayDate && ev.clientId) {
+        const client = clientMap.get(ev.clientId);
+        if (client) {
+          const estimated = client.nextActionDuration ?? statusDefaults[client.status || "lead"];
+          if (estimated != null) minutes = estimated;
+        }
+      }
+
+      if (minutes > 0) {
+        map.set(ev.date, (map.get(ev.date) || 0) + minutes);
       }
     }
     return map;
-  }, [allEvents]);
+  }, [allEvents, calendarMode, clients, statusDefaults]);
 
   // Navigate to dashboard with event selected
   const handleEventClick = useCallback((event: AppEvent) => {
