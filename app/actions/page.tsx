@@ -33,6 +33,24 @@ const EVENT_ICONS: Partial<Record<EventType, { icon: string; color: string; titl
   "photo":         { icon: "photo",     color: "#ec4899",  title: "Photo" },
 };
 
+// Status → block color for forecast schedule
+const STATUS_BLOCK_COLORS: Record<string, string> = {
+  lead: "#6b7280",
+  propose: "#3b82f6",
+  sent: "#8b5cf6",
+  schedule: "#d97706",
+  "project-management": "#0891b2",
+  collections: "#ea580c",
+  "paid-in-full": "#16a34a",
+};
+
+type ForecastBlock = {
+  left: number;   // pixels from column 0
+  width: number;  // pixels
+  label: string;  // client display name
+  color: string;  // hex color
+};
+
 function todayStr(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -82,6 +100,8 @@ export default function ActionsPage() {
   const [statusDefaults, setStatusDefaults] = useState<Record<string, number>>({});
   const [calendarMode, setCalendarMode] = useState<"history" | "forecast">("history");
   const [hideWeekends, setHideWeekends] = useState(false);
+  const [dailyHoursLimit, setDailyHoursLimit] = useState(8);
+  const [forecastGaps, setForecastGaps] = useState<Record<string, number>>({});
 
   useEffect(() => {
     setClients(loadClients());
@@ -91,6 +111,12 @@ export default function ActionsPage() {
       if (saved) setStatusDefaults(JSON.parse(saved));
     } catch { /* ignore */ }
     if (localStorage.getItem("plaud-hide-weekends") === "true") setHideWeekends(true);
+    const dhl = localStorage.getItem("plaud-daily-hours-limit");
+    if (dhl) setDailyHoursLimit(parseFloat(dhl) || 8);
+    try {
+      const fg = localStorage.getItem("plaud-forecast-gaps");
+      if (fg) setForecastGaps(JSON.parse(fg));
+    } catch { /* ignore */ }
     setMounted(true);
   }, []);
 
@@ -254,6 +280,38 @@ export default function ActionsPage() {
     return map;
   }, [allEvents, calendarMode, clients, statusDefaults]);
 
+  // Forecast schedule blocks — pack clients into days per status group
+  const scheduleBlocks = useMemo(() => {
+    if (calendarMode !== "forecast") return new Map<string, ForecastBlock>();
+
+    const blocks = new Map<string, ForecastBlock>();
+    const dailyLimitMin = dailyHoursLimit * 60;
+
+    for (const group of grouped) {
+      let currentMinutes = 0;
+
+      for (const client of group.clients) {
+        const gap = forecastGaps[client.id] || 0;
+        currentMinutes += gap;
+
+        const duration = client.nextActionDuration ?? statusDefaults[group.status] ?? 0;
+        const left = (currentMinutes / dailyLimitMin) * CELL_SIZE;
+        const width = duration > 0 ? (duration / dailyLimitMin) * CELL_SIZE : 0;
+
+        blocks.set(client.id, {
+          left,
+          width,
+          label: getLastName(client.name),
+          color: STATUS_BLOCK_COLORS[group.status] || "#6b7280",
+        });
+
+        currentMinutes += duration;
+      }
+    }
+
+    return blocks;
+  }, [calendarMode, grouped, statusDefaults, forecastGaps, dailyHoursLimit]);
+
   // Navigate to dashboard with event selected
   const handleEventClick = useCallback((event: AppEvent) => {
     if (event.clientId) {
@@ -370,6 +428,20 @@ export default function ActionsPage() {
     });
   }, []);
 
+  const handleBlockDrag = useCallback((clientId: string, deltaPx: number) => {
+    const dailyLimitMin = dailyHoursLimit * 60;
+    const deltaMinutes = Math.round((deltaPx / CELL_SIZE) * dailyLimitMin);
+    if (deltaMinutes === 0) return;
+
+    setForecastGaps((prev) => {
+      const next = { ...prev };
+      const currentGap = next[clientId] || 0;
+      next[clientId] = Math.max(0, currentGap + deltaMinutes);
+      localStorage.setItem("plaud-forecast-gaps", JSON.stringify(next));
+      return next;
+    });
+  }, [dailyHoursLimit]);
+
   if (!mounted) return null;
 
   const today = todayStr();
@@ -406,6 +478,22 @@ export default function ActionsPage() {
           >
             {hideWeekends ? "Show W/E" : "Hide W/E"}
           </button>
+          <div className="flex items-center gap-0.5 text-[10px] text-muted">
+            <input
+              type="number"
+              value={dailyHoursLimit}
+              onChange={(e) => {
+                const val = parseFloat(e.target.value) || 8;
+                setDailyHoursLimit(val);
+                localStorage.setItem("plaud-daily-hours-limit", String(val));
+              }}
+              className="w-7 text-center text-[10px] font-medium border border-border rounded px-0.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-accent bg-transparent"
+              min={1}
+              max={24}
+              step={0.5}
+            />
+            <span className="text-[9px]">hrs/day</span>
+          </div>
           <NavButtons />
         </div>
       </header>
@@ -610,6 +698,8 @@ export default function ActionsPage() {
                       dateToCol={dateToCol}
                       today={today}
                       hideWeekends={hideWeekends}
+                      forecastBlock={scheduleBlocks.get(client.id) || null}
+                      onBlockDrag={calendarMode === "forecast" ? (dx: number) => handleBlockDrag(client.id, dx) : undefined}
                       onEventClick={handleEventClick}
                     />
                   );
@@ -668,6 +758,8 @@ function TimelineRow({
   dateToCol,
   today,
   hideWeekends,
+  forecastBlock,
+  onBlockDrag,
   onEventClick,
 }: {
   events: AppEvent[];
@@ -675,8 +767,11 @@ function TimelineRow({
   dateToCol: Map<string, number>;
   today: string;
   hideWeekends: boolean;
+  forecastBlock?: ForecastBlock | null;
+  onBlockDrag?: (deltaPx: number) => void;
   onEventClick: (event: AppEvent) => void;
 }) {
+  const dragRef = useRef<{ startX: number } | null>(null);
   // Group events by date
   const eventsByDate = useMemo(() => {
     const map = new Map<string, AppEvent[]>();
@@ -700,6 +795,36 @@ function TimelineRow({
 
   return (
     <div className="flex border-b border-border relative" style={{ height: ROW_HEIGHT }}>
+      {/* Forecast schedule block — rendered first so it paints behind line/dots */}
+      {forecastBlock && forecastBlock.width > 0 && (
+        <div
+          className="absolute top-1 bottom-1 rounded-sm flex items-center px-1 overflow-hidden cursor-grab active:cursor-grabbing select-none touch-none"
+          style={{
+            left: forecastBlock.left,
+            width: Math.max(forecastBlock.width, 8),
+            backgroundColor: forecastBlock.color,
+            opacity: 0.7,
+          }}
+          onPointerDown={(e) => {
+            if (!onBlockDrag) return;
+            e.preventDefault();
+            (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+            dragRef.current = { startX: e.clientX };
+          }}
+          onPointerUp={(e) => {
+            if (!dragRef.current || !onBlockDrag) return;
+            const dx = e.clientX - dragRef.current.startX;
+            dragRef.current = null;
+            if (Math.abs(dx) > 4) onBlockDrag(dx);
+          }}
+          onPointerCancel={() => { dragRef.current = null; }}
+        >
+          <span className="text-[8px] text-white font-medium truncate whitespace-nowrap">
+            {forecastBlock.label}
+          </span>
+        </div>
+      )}
+
       {/* Connecting line */}
       {lineStartCol >= 0 && lineEndCol >= lineStartCol && (
         <div
