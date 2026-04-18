@@ -356,10 +356,20 @@ function DayCalendarView({ events, selectedEventId, onSelectEvent, onUpdateEvent
             return (
               <button
                 key={ev.id}
-                onClick={() => onSelectEvent(isSelected ? null : ev.id)}
+                onClick={() => {
+                  if (!dragState) onSelectEvent(isSelected ? null : ev.id);
+                }}
+                onPointerDown={(e) => {
+                  if (!onUpdateEvent || !containerRef.current) return;
+                  const gridY = e.clientY - containerRef.current.getBoundingClientRect().top + containerRef.current.scrollTop;
+                  const origHour = CAL_START_HOUR + gridY / HOUR_HEIGHT;
+                  const duration = ev.duration ? ev.duration / 60 : 0.5;
+                  handlePointerDown(e, ev.id, "move", origHour, duration);
+                }}
                 className={`w-full text-left rounded-lg border ${!ev.clientId ? "border-l-[3px] border-l-red-400" : ""} px-2 py-1.5 mb-1 text-[10px] font-semibold truncate ${colorClass} ${
                   isSelected ? "ring-2 ring-accent" : ""
-                }`}
+                }${onUpdateEvent ? " cursor-grab active:cursor-grabbing" : ""}`}
+                style={{ touchAction: onUpdateEvent ? "none" : "auto" }}
               >
                 {ev.label}
               </button>
