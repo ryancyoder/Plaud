@@ -211,6 +211,42 @@ export function resizeImage(dataUrl: string, maxDim = 1200): Promise<string> {
   });
 }
 
+export function generateVideoThumbnail(dataUrl: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const video = document.createElement("video");
+    video.preload = "auto";
+    video.muted = true;
+    video.playsInline = true;
+
+    const cleanup = () => { video.src = ""; };
+    const timeout = setTimeout(() => { cleanup(); reject(new Error("Thumbnail timeout")); }, 10000);
+
+    video.onloadeddata = () => {
+      video.currentTime = Math.min(0.5, video.duration || 0.5);
+    };
+
+    video.onseeked = () => {
+      clearTimeout(timeout);
+      try {
+        const canvas = document.createElement("canvas");
+        const maxDim = 320;
+        const scale = Math.min(maxDim / video.videoWidth, maxDim / video.videoHeight, 1);
+        canvas.width = Math.round(video.videoWidth * scale) || 320;
+        canvas.height = Math.round(video.videoHeight * scale) || 180;
+        const ctx = canvas.getContext("2d")!;
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", 0.6));
+      } catch {
+        reject(new Error("Canvas draw failed"));
+      }
+      cleanup();
+    };
+
+    video.onerror = () => { clearTimeout(timeout); cleanup(); reject(new Error("Video load failed")); };
+    video.src = dataUrl;
+  });
+}
+
 // --- Scratchpad storage ---
 // One scratchpad per client, stored as a PNG data URL of the canvas
 // plus the strokes array for undo support.

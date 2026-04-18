@@ -6,6 +6,7 @@ export interface Attachment {
   type: "photo" | "video" | "document" | "note";
   mimeType: string;
   dataUrl: string; // base64 data URL
+  thumbnail?: string; // base64 JPEG thumbnail for videos
   timestamp?: string; // ISO date-time
 }
 

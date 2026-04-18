@@ -6,7 +6,7 @@ import { formatDuration, getTagColor, formatDate } from "@/lib/utils";
 import { hasApiKey, getCachedSegmentSummary, generateSegmentSummary, getCachedSummary, generateDailySummary } from "@/lib/claude-api";
 import PdfViewer from "@/components/PdfViewer";
 import DrawingCanvas from "@/components/DrawingCanvas";
-import { loadScratchpad, saveScratchpad, ScratchpadData, ScratchpadStroke } from "@/lib/attachment-store";
+import { loadScratchpad, saveScratchpad, ScratchpadData, ScratchpadStroke, generateVideoThumbnail } from "@/lib/attachment-store";
 
 type Tab = "transcript" | "photos" | "videos" | "documents" | "scratchpad";
 type ViewMode = "event" | "client-aggregate" | "day-aggregate";
@@ -446,7 +446,11 @@ function EventView({
               <div key={att.id} className="shrink-0 w-16 h-16 rounded-lg overflow-hidden border border-border relative group">
                 {att.mimeType.startsWith("video/") ? (
                   <div className="w-full h-full relative">
-                    <video src={att.dataUrl + "#t=0.1"} className="w-full h-full object-cover" muted playsInline preload="metadata" />
+                    {att.thumbnail ? (
+                      <img src={att.thumbnail} alt={att.name} className="w-full h-full object-cover" />
+                    ) : (
+                      <video src={att.dataUrl + "#t=0.1"} className="w-full h-full object-cover" muted playsInline preload="metadata" />
+                    )}
                     <div className="absolute inset-0 flex items-center justify-center">
                       <div className="w-5 h-5 rounded-full bg-black/60 flex items-center justify-center">
                         <svg width="8" height="8" viewBox="0 0 24 24" fill="white"><polygon points="5,3 19,12 5,21" /></svg>
@@ -1389,12 +1393,17 @@ function MediaGallery({
             reader.onerror = () => reject(new Error("Read failed"));
             reader.readAsDataURL(file);
           });
+          let thumbnail: string | undefined;
+          if (file.type.startsWith("video/")) {
+            try { thumbnail = await generateVideoThumbnail(dataUrl); } catch { /* skip */ }
+          }
           attachments.push({
             id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
             name: file.name,
             type: file.type.startsWith("video/") ? "video" : file.type.startsWith("image/") ? "photo" : "document",
             mimeType: file.type,
             dataUrl,
+            ...(thumbnail ? { thumbnail } : {}),
             timestamp: new Date().toISOString(),
           });
         } catch {
@@ -1440,7 +1449,11 @@ function MediaGallery({
             <button key={item.id} onClick={() => setLightboxIndex(i)} className={`${isVideo ? "aspect-video" : "aspect-square"} rounded-lg overflow-hidden border border-border relative group`}>
               {isVideo ? (
                 <>
-                  <video src={item.dataUrl + "#t=0.1"} className="w-full h-full object-cover" muted playsInline preload="metadata" />
+                  {item.thumbnail ? (
+                    <img src={item.thumbnail} alt={item.name} className="w-full h-full object-cover" />
+                  ) : (
+                    <video src={item.dataUrl + "#t=0.1"} className="w-full h-full object-cover" muted playsInline preload="metadata" />
+                  )}
                   <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                     <div className="w-8 h-8 rounded-full bg-black/60 flex items-center justify-center">
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="white"><polygon points="5,3 19,12 5,21" /></svg>

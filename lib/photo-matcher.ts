@@ -20,7 +20,7 @@
  */
 
 import { AppEvent, Attachment, Client } from "./types";
-import { resizeImage } from "./attachment-store";
+import { resizeImage, generateVideoThumbnail } from "./attachment-store";
 
 // ─── GPS / Geocoding types ──────────────────────────────────────────
 
@@ -1037,7 +1037,11 @@ export async function batchMatchPhotos(
           readFileAsDataUrl(file),
         ]);
         const resized = isVideo ? dataUrl : await resizeImage(dataUrl, 1200);
-        return { file, meta, resized };
+        let thumbnail: string | undefined;
+        if (isVideo) {
+          try { thumbnail = await generateVideoThumbnail(dataUrl); } catch { /* skip */ }
+        }
+        return { file, meta, resized, thumbnail };
       } catch (err) {
         console.warn(`Skipping file ${file.name}:`, err);
         return null;
@@ -1047,7 +1051,7 @@ export async function batchMatchPhotos(
   const processed = processedRaw.filter((p): p is NonNullable<typeof p> => p !== null);
 
   // Step 2: Match photos to recording events by timestamp
-  for (const { file, meta, resized } of processed) {
+  for (const { file, meta, resized, thumbnail } of processed) {
     if (meta.gps) gpsFound++;
 
     const attachment: Attachment = {
@@ -1056,6 +1060,7 @@ export async function batchMatchPhotos(
       type: file.type.startsWith("video/") ? "video" : "photo",
       mimeType: file.type,
       dataUrl: resized,
+      ...(thumbnail ? { thumbnail } : {}),
       timestamp: meta.timestamp.toISOString(),
     };
 
