@@ -431,7 +431,7 @@ function EventView({
               <div key={att.id} className="shrink-0 w-16 h-16 rounded-lg overflow-hidden border border-border relative group">
                 {att.mimeType.startsWith("video/") ? (
                   <div className="w-full h-full relative">
-                    <video src={att.dataUrl} className="w-full h-full object-cover" muted preload="metadata" />
+                    <video src={att.dataUrl + "#t=0.1"} className="w-full h-full object-cover" muted preload="metadata" />
                     <div className="absolute inset-0 flex items-center justify-center">
                       <div className="w-5 h-5 rounded-full bg-black/60 flex items-center justify-center">
                         <svg width="8" height="8" viewBox="0 0 24 24" fill="white"><polygon points="5,3 19,12 5,21" /></svg>
@@ -1357,7 +1357,7 @@ function PhotoGallery({
             <button key={img.id} onClick={() => setLightboxIndex(i)} className="aspect-square rounded-lg overflow-hidden border border-border relative group">
               {img.mimeType.startsWith("video/") ? (
                 <>
-                  <video src={img.dataUrl} className="w-full h-full object-cover" muted preload="metadata" />
+                  <video src={img.dataUrl + "#t=0.1"} className="w-full h-full object-cover" muted preload="metadata" />
                   <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                     <div className="w-7 h-7 rounded-full bg-black/60 flex items-center justify-center">
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="white"><polygon points="5,3 19,12 5,21" /></svg>
