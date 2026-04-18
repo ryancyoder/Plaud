@@ -3,10 +3,11 @@
 import { Attachment } from "./types";
 
 const DB_NAME = "plaud-attachments";
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 const STORE_NAME = "attachments";
 const PENDING_STORE = "pending-photos";
 const SCRATCHPAD_STORE = "scratchpads";
+const VIDEO_BLOB_STORE = "video-blobs";
 
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -21,6 +22,9 @@ function openDB(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains(SCRATCHPAD_STORE)) {
         db.createObjectStore(SCRATCHPAD_STORE, { keyPath: "clientId" });
+      }
+      if (!db.objectStoreNames.contains(VIDEO_BLOB_STORE)) {
+        db.createObjectStore(VIDEO_BLOB_STORE);
       }
     };
     request.onsuccess = () => resolve(request.result);
@@ -58,7 +62,7 @@ export async function saveAttachments(transcriptId: string, attachments: Attachm
 
 export async function loadAttachments(transcriptId: string): Promise<Attachment[]> {
   const db = await openDB();
-  return new Promise((resolve, reject) => {
+  const raw: Attachment[] = await new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readonly");
     const store = tx.objectStore(STORE_NAME);
     const request = store.getAll();
@@ -71,33 +75,38 @@ export async function loadAttachments(transcriptId: string): Promise<Attachment[
     };
     request.onerror = () => reject(request.error);
   });
+  return resolveAttachmentUrls(raw);
 }
 
 export async function loadAllAttachments(): Promise<Record<string, Attachment[]>> {
   const db = await openDB();
-  return new Promise((resolve, reject) => {
+  const grouped: Record<string, Attachment[]> = await new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readonly");
     const store = tx.objectStore(STORE_NAME);
     const request = store.getAll();
     request.onsuccess = () => {
       const all = request.result as StoredAttachment[];
-      const grouped: Record<string, Attachment[]> = {};
+      const g: Record<string, Attachment[]> = {};
       for (const { transcriptId, ...att } of all) {
-        if (!grouped[transcriptId]) grouped[transcriptId] = [];
-        grouped[transcriptId].push(att as Attachment);
+        if (!g[transcriptId]) g[transcriptId] = [];
+        g[transcriptId].push(att as Attachment);
       }
-      resolve(grouped);
+      resolve(g);
     };
     request.onerror = () => reject(request.error);
   });
+  for (const key of Object.keys(grouped)) {
+    grouped[key] = await resolveAttachmentUrls(grouped[key]);
+  }
+  return grouped;
 }
 
 export async function removeAttachment(attachmentId: string): Promise<void> {
   const db = await openDB();
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, "readwrite");
-    const store = tx.objectStore(STORE_NAME);
-    store.delete(attachmentId);
+    const tx = db.transaction([STORE_NAME, VIDEO_BLOB_STORE], "readwrite");
+    tx.objectStore(STORE_NAME).delete(attachmentId);
+    tx.objectStore(VIDEO_BLOB_STORE).delete(attachmentId);
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });
@@ -209,6 +218,52 @@ export function resizeImage(dataUrl: string, maxDim = 1200): Promise<string> {
     img.onerror = () => resolve(dataUrl); // fallback to original
     img.src = dataUrl;
   });
+}
+
+// --- Video blob storage (avoids base64 overhead for large files) ---
+
+export async function saveVideoBlob(key: string, blob: Blob): Promise<void> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(VIDEO_BLOB_STORE, "readwrite");
+    tx.objectStore(VIDEO_BLOB_STORE).put(blob, key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+export async function loadVideoBlob(key: string): Promise<string | null> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(VIDEO_BLOB_STORE, "readonly");
+    const request = tx.objectStore(VIDEO_BLOB_STORE).get(key);
+    request.onsuccess = () => {
+      const blob = request.result as Blob | undefined;
+      resolve(blob ? URL.createObjectURL(blob) : null);
+    };
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function removeVideoBlob(key: string): Promise<void> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(VIDEO_BLOB_STORE, "readwrite");
+    tx.objectStore(VIDEO_BLOB_STORE).delete(key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+export async function resolveAttachmentUrls(attachments: Attachment[]): Promise<Attachment[]> {
+  const resolved = [...attachments];
+  for (let i = 0; i < resolved.length; i++) {
+    if (resolved[i].blobKey && !resolved[i].dataUrl) {
+      const blobUrl = await loadVideoBlob(resolved[i].blobKey!);
+      if (blobUrl) resolved[i] = { ...resolved[i], dataUrl: blobUrl };
+    }
+  }
+  return resolved;
 }
 
 export function generateVideoThumbnail(dataUrl: string): Promise<string> {

@@ -5,8 +5,9 @@ export interface Attachment {
   name: string;
   type: "photo" | "video" | "document" | "note";
   mimeType: string;
-  dataUrl: string; // base64 data URL
+  dataUrl: string; // base64 data URL (empty for blob-stored videos)
   thumbnail?: string; // base64 JPEG thumbnail for videos
+  blobKey?: string; // IDB key for blob-stored video data
   timestamp?: string; // ISO date-time
 }
 

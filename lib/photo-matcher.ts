@@ -20,7 +20,7 @@
  */
 
 import { AppEvent, Attachment, Client } from "./types";
-import { resizeImage, generateVideoThumbnail } from "./attachment-store";
+import { resizeImage, generateVideoThumbnail, saveVideoBlob } from "./attachment-store";
 
 // ─── GPS / Geocoding types ──────────────────────────────────────────
 
@@ -1027,21 +1027,32 @@ export async function batchMatchPhotos(
     fileTypes[f.type] = (fileTypes[f.type] || 0) + 1;
   }
 
-  // Step 1: Extract EXIF + resize all photos in parallel (videos stored as-is)
+  // Step 1: Extract EXIF + resize all photos in parallel (videos stored as blobs)
   const processedRaw = await Promise.all(
     mediaFiles.map(async (file) => {
       try {
         const isVideo = file.type.startsWith("video/");
-        const [meta, dataUrl] = await Promise.all([
-          isVideo ? { timestamp: new Date(file.lastModified), gps: null, dateSource: "file" as const } : getPhotoMetadata(file),
-          readFileAsDataUrl(file),
-        ]);
-        const resized = isVideo ? dataUrl : await resizeImage(dataUrl, 1200);
+        const meta = isVideo
+          ? { timestamp: new Date(file.lastModified), gps: null, dateSource: "file" as const }
+          : await getPhotoMetadata(file);
+
+        let resized = "";
         let thumbnail: string | undefined;
+        let blobKey: string | undefined;
+        const attId = `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
         if (isVideo) {
-          try { thumbnail = await generateVideoThumbnail(dataUrl); } catch { /* skip */ }
+          await saveVideoBlob(attId, file);
+          blobKey = attId;
+          const blobUrl = URL.createObjectURL(file);
+          try { thumbnail = await generateVideoThumbnail(blobUrl); } catch { /* skip */ }
+          URL.revokeObjectURL(blobUrl);
+        } else {
+          const dataUrl = await readFileAsDataUrl(file);
+          resized = await resizeImage(dataUrl, 1200);
         }
-        return { file, meta, resized, thumbnail };
+
+        return { file, meta, resized, thumbnail, blobKey, attId };
       } catch (err) {
         console.warn(`Skipping file ${file.name}:`, err);
         return null;
@@ -1051,16 +1062,17 @@ export async function batchMatchPhotos(
   const processed = processedRaw.filter((p): p is NonNullable<typeof p> => p !== null);
 
   // Step 2: Match photos to recording events by timestamp
-  for (const { file, meta, resized, thumbnail } of processed) {
+  for (const { file, meta, resized, thumbnail, blobKey, attId } of processed) {
     if (meta.gps) gpsFound++;
 
     const attachment: Attachment = {
-      id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      id: attId,
       name: file.name,
       type: file.type.startsWith("video/") ? "video" : "photo",
       mimeType: file.type,
       dataUrl: resized,
       ...(thumbnail ? { thumbnail } : {}),
+      ...(blobKey ? { blobKey } : {}),
       timestamp: meta.timestamp.toISOString(),
     };
 

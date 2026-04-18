@@ -6,7 +6,7 @@ import { formatDuration, getTagColor, formatDate } from "@/lib/utils";
 import { hasApiKey, getCachedSegmentSummary, generateSegmentSummary, getCachedSummary, generateDailySummary } from "@/lib/claude-api";
 import PdfViewer from "@/components/PdfViewer";
 import DrawingCanvas from "@/components/DrawingCanvas";
-import { loadScratchpad, saveScratchpad, ScratchpadData, ScratchpadStroke, generateVideoThumbnail } from "@/lib/attachment-store";
+import { loadScratchpad, saveScratchpad, ScratchpadData, ScratchpadStroke, generateVideoThumbnail, saveVideoBlob, resolveAttachmentUrls } from "@/lib/attachment-store";
 
 type Tab = "transcript" | "photos" | "videos" | "documents" | "scratchpad";
 type ViewMode = "event" | "client-aggregate" | "day-aggregate";
@@ -669,40 +669,47 @@ function renderMarkdown(md: string): string {
     .replace(/\n/g, "<br>");
 }
 
-function handleFileAttach(
+async function handleFileAttach(
   files: FileList,
   eventId: string,
   onAddAttachments: (eventId: string, attachments: Attachment[]) => void,
 ) {
-  const promises = Array.from(files).map(
-    (file) => new Promise<Attachment | null>((resolve) => {
-      if (file.size > 200 * 1024 * 1024) {
-        alert(`"${file.name}" is too large (${Math.round(file.size / 1024 / 1024)}MB). Max 200MB.`);
-        resolve(null);
-        return;
-      }
-      const reader = new FileReader();
-      reader.onload = () => {
-        resolve({
-          id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  const attachments: Attachment[] = [];
+  for (const file of Array.from(files)) {
+    try {
+      const attId = `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      if (file.type.startsWith("video/")) {
+        await saveVideoBlob(attId, file);
+        attachments.push({
+          id: attId,
           name: file.name,
-          type: file.type.startsWith("video/") ? "video" : file.type.startsWith("image/") ? "photo" : "document",
+          type: "video",
           mimeType: file.type,
-          dataUrl: reader.result as string,
+          dataUrl: "",
+          blobKey: attId,
           timestamp: new Date().toISOString(),
         });
-      };
-      reader.onerror = () => {
-        console.error(`Failed to read file: ${file.name}`);
-        resolve(null);
-      };
-      reader.readAsDataURL(file);
-    }),
-  );
-  Promise.all(promises).then((results) => {
-    const attachments = results.filter((a): a is Attachment => a !== null);
-    if (attachments.length > 0) onAddAttachments(eventId, attachments);
-  });
+      } else {
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = () => reject(new Error("Read failed"));
+          reader.readAsDataURL(file);
+        });
+        attachments.push({
+          id: attId,
+          name: file.name,
+          type: file.type.startsWith("image/") ? "photo" : "document",
+          mimeType: file.type,
+          dataUrl,
+          timestamp: new Date().toISOString(),
+        });
+      }
+    } catch {
+      console.error(`Failed to read file: ${file.name}`);
+    }
+  }
+  if (attachments.length > 0) onAddAttachments(eventId, attachments);
 }
 
 // --- Documents Tab ---
@@ -1382,32 +1389,45 @@ function MediaGallery({
     try {
       const attachments: Attachment[] = [];
       for (const file of Array.from(files)) {
-        if (file.size > 200 * 1024 * 1024) {
-          alert(`"${file.name}" is too large (${Math.round(file.size / 1024 / 1024)}MB). Max 200MB.`);
-          continue;
-        }
         try {
-          const dataUrl = await new Promise<string>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(reader.result as string);
-            reader.onerror = () => reject(new Error("Read failed"));
-            reader.readAsDataURL(file);
-          });
-          let thumbnail: string | undefined;
-          if (file.type.startsWith("video/")) {
-            try { thumbnail = await generateVideoThumbnail(dataUrl); } catch { /* skip */ }
+          const attId = `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+          const isVid = file.type.startsWith("video/");
+
+          if (isVid) {
+            // Store video as blob in IDB — no base64 conversion, no size limit
+            await saveVideoBlob(attId, file);
+            const blobUrl = URL.createObjectURL(file);
+            let thumbnail: string | undefined;
+            try { thumbnail = await generateVideoThumbnail(blobUrl); } catch { /* skip */ }
+            URL.revokeObjectURL(blobUrl);
+            attachments.push({
+              id: attId,
+              name: file.name,
+              type: "video",
+              mimeType: file.type,
+              dataUrl: "",
+              blobKey: attId,
+              ...(thumbnail ? { thumbnail } : {}),
+              timestamp: new Date().toISOString(),
+            });
+          } else {
+            const dataUrl = await new Promise<string>((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () => resolve(reader.result as string);
+              reader.onerror = () => reject(new Error("Read failed"));
+              reader.readAsDataURL(file);
+            });
+            attachments.push({
+              id: attId,
+              name: file.name,
+              type: file.type.startsWith("image/") ? "photo" : "document",
+              mimeType: file.type,
+              dataUrl,
+              timestamp: new Date().toISOString(),
+            });
           }
-          attachments.push({
-            id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-            name: file.name,
-            type: file.type.startsWith("video/") ? "video" : file.type.startsWith("image/") ? "photo" : "document",
-            mimeType: file.type,
-            dataUrl,
-            ...(thumbnail ? { thumbnail } : {}),
-            timestamp: new Date().toISOString(),
-          });
         } catch {
-          alert(`Failed to read "${file.name}". Try a smaller file.`);
+          alert(`Failed to import "${file.name}".`);
         }
       }
       if (attachments.length > 0) onAddAttachments(event.id, attachments);
