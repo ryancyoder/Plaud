@@ -106,20 +106,26 @@ export default function ImportButton({
     if (!items) return;
 
     const imageFiles: File[] = [];
+    const docFiles: File[] = [];
     for (let i = 0; i < items.length; i++) {
-      if (items[i].type.startsWith("image/")) {
-        const file = items[i].getAsFile();
-        if (file) imageFiles.push(file);
+      const file = items[i].getAsFile();
+      if (!file) continue;
+      if (items[i].type.startsWith("image/") || items[i].type.startsWith("video/")) {
+        imageFiles.push(file);
+      } else if (items[i].type === "application/pdf" || file.name?.toLowerCase().endsWith(".pdf")) {
+        docFiles.push(file);
       }
     }
 
     if (imageFiles.length > 0) {
       e.preventDefault();
-      // Create a FileList-like object via DataTransfer
       const dt = new DataTransfer();
       imageFiles.forEach(f => dt.items.add(f));
       setPendingImageFiles(dt.files);
       setPhotoStep("config");
+    } else if (docFiles.length > 0) {
+      e.preventDefault();
+      importDocuments(docFiles);
     }
   }, []);
 
@@ -134,10 +140,14 @@ export default function ImportButton({
     if (!items) return;
 
     const imageFiles: File[] = [];
+    const docFiles: File[] = [];
     for (let i = 0; i < items.length; i++) {
-      if (items[i].type.startsWith("image/")) {
-        const file = items[i].getAsFile();
-        if (file) imageFiles.push(file);
+      const file = items[i].getAsFile();
+      if (!file) continue;
+      if (items[i].type.startsWith("image/") || items[i].type.startsWith("video/")) {
+        imageFiles.push(file);
+      } else if (items[i].type === "application/pdf" || file.name?.toLowerCase().endsWith(".pdf")) {
+        docFiles.push(file);
       }
     }
 
@@ -148,6 +158,10 @@ export default function ImportButton({
       setPendingImageFiles(dt.files);
       setShowPasteArea(false);
       setPhotoStep("config");
+    } else if (docFiles.length > 0) {
+      e.preventDefault();
+      setShowPasteArea(false);
+      importDocuments(docFiles);
     }
     // Otherwise let normal text paste proceed
   }
