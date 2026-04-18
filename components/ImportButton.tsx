@@ -975,7 +975,7 @@ export default function ImportButton({
                         >
                           {thumb.file.type.startsWith("video/") ? (
                             <>
-                              <video src={thumb.url + "#t=0.1"} className="w-full h-full object-cover" muted preload="metadata" />
+                              <video src={thumb.url + "#t=0.1"} className="w-full h-full object-cover" muted playsInline preload="metadata" />
                               <div className="absolute top-1 left-1 w-5 h-5 rounded-full bg-black/60 flex items-center justify-center">
                                 <svg width="10" height="10" viewBox="0 0 24 24" fill="white"><polygon points="5,3 19,12 5,21" /></svg>
                               </div>

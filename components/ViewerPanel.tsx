@@ -8,7 +8,7 @@ import PdfViewer from "@/components/PdfViewer";
 import DrawingCanvas from "@/components/DrawingCanvas";
 import { loadScratchpad, saveScratchpad, ScratchpadData, ScratchpadStroke } from "@/lib/attachment-store";
 
-type Tab = "transcript" | "photos" | "documents" | "scratchpad";
+type Tab = "transcript" | "photos" | "videos" | "documents" | "scratchpad";
 type ViewMode = "event" | "client-aggregate" | "day-aggregate";
 
 interface ViewerPanelProps {
@@ -41,26 +41,28 @@ export default function ViewerPanel({
   const [activeTab, setActiveTab] = useState<Tab>("transcript");
 
   // Attachment counts depend on mode
-  const { photoCount, docCount } = useMemo(() => {
+  const { photoCount, videoCount, docCount } = useMemo(() => {
     const countFrom = (atts: Attachment[] | undefined) => {
-      const photos = atts?.filter((a) => a.mimeType.startsWith("image/") || a.mimeType.startsWith("video/")).length ?? 0;
+      const photos = atts?.filter((a) => a.mimeType.startsWith("image/")).length ?? 0;
+      const videos = atts?.filter((a) => a.mimeType.startsWith("video/")).length ?? 0;
       const docs = atts?.filter((a) => !a.mimeType.startsWith("image/") && !a.mimeType.startsWith("video/")).length ?? 0;
-      return { photos, docs };
+      return { photos, videos, docs };
     };
     if (viewMode === "event" && selectedEvent) {
       const c = countFrom(selectedEvent.attachments);
-      return { photoCount: c.photos, docCount: c.docs };
+      return { photoCount: c.photos, videoCount: c.videos, docCount: c.docs };
     }
     if (viewMode === "client-aggregate" || viewMode === "day-aggregate") {
-      let photos = 0, docs = 0;
+      let photos = 0, videos = 0, docs = 0;
       for (const ev of aggregateEvents) {
         const c = countFrom(ev.attachments);
         photos += c.photos;
+        videos += c.videos;
         docs += c.docs;
       }
-      return { photoCount: photos, docCount: docs };
+      return { photoCount: photos, videoCount: videos, docCount: docs };
     }
-    return { photoCount: 0, docCount: 0 };
+    return { photoCount: 0, videoCount: 0, docCount: 0 };
   }, [viewMode, selectedEvent, aggregateEvents]);
 
   // Determine which client is active (for scratchpad)
@@ -75,6 +77,7 @@ export default function ViewerPanel({
   const tabs: { key: Tab; label: string; count?: number }[] = [
     { key: "transcript", label: viewMode === "event" ? "Detail" : "Overview" },
     { key: "photos", label: "Photos", count: photoCount },
+    { key: "videos", label: "Videos", count: videoCount },
     { key: "documents", label: "Docs", count: docCount },
     ...(activeClient ? [{ key: "scratchpad" as const, label: "Pad" }] : []),
   ];
@@ -123,7 +126,19 @@ export default function ViewerPanel({
           </>
         )}
         {activeTab === "photos" && (
-          <PhotoGallery
+          <MediaGallery
+            mediaType="image"
+            event={selectedEvent}
+            viewMode={viewMode}
+            selectedClient={selectedClient}
+            aggregateEvents={aggregateEvents}
+            onAddAttachments={onAddAttachments}
+            onRemoveAttachment={onRemoveAttachment}
+          />
+        )}
+        {activeTab === "videos" && (
+          <MediaGallery
+            mediaType="video"
             event={selectedEvent}
             viewMode={viewMode}
             selectedClient={selectedClient}
@@ -431,7 +446,7 @@ function EventView({
               <div key={att.id} className="shrink-0 w-16 h-16 rounded-lg overflow-hidden border border-border relative group">
                 {att.mimeType.startsWith("video/") ? (
                   <div className="w-full h-full relative">
-                    <video src={att.dataUrl + "#t=0.1"} className="w-full h-full object-cover" muted preload="metadata" />
+                    <video src={att.dataUrl + "#t=0.1"} className="w-full h-full object-cover" muted playsInline preload="metadata" />
                     <div className="absolute inset-0 flex items-center justify-center">
                       <div className="w-5 h-5 rounded-full bg-black/60 flex items-center justify-center">
                         <svg width="8" height="8" viewBox="0 0 24 24" fill="white"><polygon points="5,3 19,12 5,21" /></svg>
@@ -656,7 +671,12 @@ function handleFileAttach(
   onAddAttachments: (eventId: string, attachments: Attachment[]) => void,
 ) {
   const promises = Array.from(files).map(
-    (file) => new Promise<Attachment>((resolve) => {
+    (file) => new Promise<Attachment | null>((resolve) => {
+      if (file.size > 200 * 1024 * 1024) {
+        alert(`"${file.name}" is too large (${Math.round(file.size / 1024 / 1024)}MB). Max 200MB.`);
+        resolve(null);
+        return;
+      }
       const reader = new FileReader();
       reader.onload = () => {
         resolve({
@@ -668,10 +688,17 @@ function handleFileAttach(
           timestamp: new Date().toISOString(),
         });
       };
+      reader.onerror = () => {
+        console.error(`Failed to read file: ${file.name}`);
+        resolve(null);
+      };
       reader.readAsDataURL(file);
     }),
   );
-  Promise.all(promises).then((attachments) => onAddAttachments(eventId, attachments));
+  Promise.all(promises).then((results) => {
+    const attachments = results.filter((a): a is Attachment => a !== null);
+    if (attachments.length > 0) onAddAttachments(eventId, attachments);
+  });
 }
 
 // --- Documents Tab ---
@@ -1282,9 +1309,10 @@ function ScratchpadTab({ client, photos, documents }: { client: Client; photos: 
   );
 }
 
-// --- Photos Tab ---
+// --- Media Gallery (Photos / Videos tabs) ---
 
-function PhotoGallery({
+function MediaGallery({
+  mediaType,
   event,
   viewMode,
   selectedClient,
@@ -1292,6 +1320,7 @@ function PhotoGallery({
   onAddAttachments,
   onRemoveAttachment,
 }: {
+  mediaType: "image" | "video";
   event: AppEvent | null;
   viewMode: ViewMode;
   selectedClient: Client | null;
@@ -1302,18 +1331,21 @@ function PhotoGallery({
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const touchStartX = useRef(0);
+  const isVideo = mediaType === "video";
+  const label = isVideo ? "video" : "photo";
 
-  const photos = useMemo(() => {
+  const items = useMemo(() => {
+    const filter = (a: Attachment) => a.mimeType.startsWith(mediaType + "/");
     if (viewMode === "event" && event) {
       return (event.attachments || [])
-        .filter((a) => a.mimeType.startsWith("image/") || a.mimeType.startsWith("video/"))
+        .filter(filter)
         .map((a) => ({ ...a, eventLabel: event.label, eventDate: event.date }));
     }
     if (viewMode === "client-aggregate" || viewMode === "day-aggregate") {
       const result: (Attachment & { eventLabel: string; eventDate: string })[] = [];
       for (const ev of aggregateEvents) {
         for (const att of ev.attachments || []) {
-          if (att.mimeType.startsWith("image/") || att.mimeType.startsWith("video/")) {
+          if (filter(att)) {
             result.push({ ...att, eventLabel: ev.label, eventDate: ev.date });
           }
         }
@@ -1321,79 +1353,89 @@ function PhotoGallery({
       return result;
     }
     return [];
-  }, [viewMode, event, aggregateEvents]);
+  }, [viewMode, event, aggregateEvents, mediaType]);
 
   const handleSwipe = useCallback(
     (direction: "left" | "right") => {
       if (lightboxIndex === null) return;
-      if (direction === "left" && lightboxIndex < photos.length - 1) setLightboxIndex(lightboxIndex + 1);
+      if (direction === "left" && lightboxIndex < items.length - 1) setLightboxIndex(lightboxIndex + 1);
       else if (direction === "right" && lightboxIndex > 0) setLightboxIndex(lightboxIndex - 1);
     },
-    [lightboxIndex, photos.length],
+    [lightboxIndex, items.length],
   );
 
   const heading = viewMode === "client-aggregate" && selectedClient
-    ? `${selectedClient.name}'s Media (${photos.length})`
-    : `${photos.length} item${photos.length !== 1 ? "s" : ""}`;
+    ? `${selectedClient.name}'s ${isVideo ? "Videos" : "Photos"} (${items.length})`
+    : `${items.length} ${label}${items.length !== 1 ? "s" : ""}`;
 
   const canUpload = viewMode === "event" && event;
+  const acceptAttr = isVideo ? "video/*" : "image/*";
 
   return (
     <div className="p-3">
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-xs font-semibold">{heading}</h3>
         {canUpload && (
-          <div>
-            <input ref={fileInputRef} type="file" accept="image/*,video/*" multiple className="hidden"
+          <div className="flex gap-1.5">
+            <input ref={fileInputRef} type="file" accept={acceptAttr} multiple className="hidden"
               onChange={(e) => { const f = e.target.files; if (f && f.length > 0) { handleFileAttach(f, event.id, onAddAttachments); e.target.value = ""; } }} />
-            <button onClick={() => fileInputRef.current?.click()} className="text-[11px] px-3 py-1 rounded-lg bg-accent text-white font-medium hover:bg-blue-600 active:scale-95">+ Add Media</button>
+            <button onClick={() => fileInputRef.current?.click()} className="text-[11px] px-3 py-1 rounded-lg bg-accent text-white font-medium hover:bg-blue-600 active:scale-95">+ Add</button>
           </div>
         )}
       </div>
 
-      {photos.length > 0 ? (
-        <div className="grid grid-cols-3 gap-2 mb-3">
-          {photos.map((img, i) => (
-            <button key={img.id} onClick={() => setLightboxIndex(i)} className="aspect-square rounded-lg overflow-hidden border border-border relative group">
-              {img.mimeType.startsWith("video/") ? (
+      {items.length > 0 ? (
+        <div className={`grid ${isVideo ? "grid-cols-2" : "grid-cols-3"} gap-2 mb-3`}>
+          {items.map((item, i) => (
+            <button key={item.id} onClick={() => setLightboxIndex(i)} className={`${isVideo ? "aspect-video" : "aspect-square"} rounded-lg overflow-hidden border border-border relative group`}>
+              {isVideo ? (
                 <>
-                  <video src={img.dataUrl + "#t=0.1"} className="w-full h-full object-cover" muted preload="metadata" />
+                  <video src={item.dataUrl + "#t=0.1"} className="w-full h-full object-cover" muted playsInline preload="metadata" />
                   <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                    <div className="w-7 h-7 rounded-full bg-black/60 flex items-center justify-center">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="white"><polygon points="5,3 19,12 5,21" /></svg>
+                    <div className="w-8 h-8 rounded-full bg-black/60 flex items-center justify-center">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="white"><polygon points="5,3 19,12 5,21" /></svg>
                     </div>
                   </div>
                 </>
               ) : (
-                <img src={img.dataUrl} alt={img.name} className="w-full h-full object-cover" />
+                <img src={item.dataUrl} alt={item.name} className="w-full h-full object-cover" />
               )}
               {viewMode !== "event" && (
                 <div className="absolute bottom-0 left-0 right-0 bg-black/50 px-1.5 py-0.5">
-                  <span className="text-[8px] text-white truncate block">{img.eventDate}</span>
+                  <span className="text-[8px] text-white truncate block">{item.eventDate}</span>
                 </div>
               )}
               {viewMode === "event" && event && (
                 <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity">
                   <button
-                    onClick={(e) => { e.stopPropagation(); onRemoveAttachment(event.id, img.id); }}
+                    onClick={(e) => { e.stopPropagation(); onRemoveAttachment(event.id, item.id); }}
                     className="w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center text-[10px] shadow"
                   >x</button>
                 </div>
               )}
+              <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/40 to-transparent px-1.5 py-0.5">
+                <span className="text-[8px] text-white/80 truncate block">{item.name}</span>
+              </div>
             </button>
           ))}
         </div>
       ) : (
         <div className="flex flex-col items-center justify-center py-8 text-gray-300">
-          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="mb-2">
-            <rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21 15 16 10 5 21" />
-          </svg>
-          <p className="text-xs">No photos or videos</p>
+          {isVideo ? (
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="mb-2">
+              <rect x="2" y="4" width="15" height="16" rx="2" /><path d="M17 8l5-3v14l-5-3V8z" />
+            </svg>
+          ) : (
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="mb-2">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21 15 16 10 5 21" />
+            </svg>
+          )}
+          <p className="text-xs">No {label}s</p>
         </div>
       )}
 
       {/* Lightbox */}
-      {lightboxIndex !== null && photos[lightboxIndex] && (
+      {lightboxIndex !== null && items[lightboxIndex] && (
         <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center"
           onClick={() => setLightboxIndex(null)}
           onTouchStart={(e) => { touchStartX.current = e.touches[0].clientX; }}
@@ -1407,18 +1449,18 @@ function PhotoGallery({
               <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="15 18 9 12 15 6" /></svg>
             </button>
           )}
-          {lightboxIndex < photos.length - 1 && (
+          {lightboxIndex < items.length - 1 && (
             <button onClick={(e) => { e.stopPropagation(); setLightboxIndex(lightboxIndex + 1); }} className="absolute right-3 text-white/70 hover:text-white p-2">
               <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="9 18 15 12 9 6" /></svg>
             </button>
           )}
-          {photos[lightboxIndex].mimeType.startsWith("video/") ? (
-            <video src={photos[lightboxIndex].dataUrl} controls autoPlay className="max-w-[90vw] max-h-[85vh] rounded-lg" onClick={(e) => e.stopPropagation()} />
+          {items[lightboxIndex].mimeType.startsWith("video/") ? (
+            <video src={items[lightboxIndex].dataUrl} controls autoPlay playsInline className="max-w-[90vw] max-h-[85vh] rounded-lg" onClick={(e) => e.stopPropagation()} />
           ) : (
-            <img src={photos[lightboxIndex].dataUrl} alt={photos[lightboxIndex].name} className="max-w-[90vw] max-h-[85vh] object-contain rounded-lg" onClick={(e) => e.stopPropagation()} />
+            <img src={items[lightboxIndex].dataUrl} alt={items[lightboxIndex].name} className="max-w-[90vw] max-h-[85vh] object-contain rounded-lg" onClick={(e) => e.stopPropagation()} />
           )}
           <div className="absolute bottom-4 text-white/60 text-xs">
-            {lightboxIndex + 1} / {photos.length} — {photos[lightboxIndex].name}
+            {lightboxIndex + 1} / {items.length} — {items[lightboxIndex].name}
           </div>
         </div>
       )}
