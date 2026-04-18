@@ -1022,19 +1022,20 @@ export async function batchMatchPhotos(
   const fileTypes: Record<string, number> = {};
   let gpsFound = 0;
 
-  const imageFiles = Array.from(files).filter((f) => f.type.startsWith("image/"));
-  for (const f of imageFiles) {
+  const mediaFiles = Array.from(files).filter((f) => f.type.startsWith("image/") || f.type.startsWith("video/"));
+  for (const f of mediaFiles) {
     fileTypes[f.type] = (fileTypes[f.type] || 0) + 1;
   }
 
-  // Step 1: Extract EXIF + resize all photos in parallel
+  // Step 1: Extract EXIF + resize all photos in parallel (videos stored as-is)
   const processed = await Promise.all(
-    imageFiles.map(async (file) => {
+    mediaFiles.map(async (file) => {
+      const isVideo = file.type.startsWith("video/");
       const [meta, dataUrl] = await Promise.all([
-        getPhotoMetadata(file),
+        isVideo ? { timestamp: new Date(file.lastModified), gps: null, dateSource: "file" as const } : getPhotoMetadata(file),
         readFileAsDataUrl(file),
       ]);
-      const resized = await resizeImage(dataUrl, 1200);
+      const resized = isVideo ? dataUrl : await resizeImage(dataUrl, 1200);
       return { file, meta, resized };
     }),
   );
@@ -1046,7 +1047,7 @@ export async function batchMatchPhotos(
     const attachment: Attachment = {
       id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       name: file.name,
-      type: "photo",
+      type: file.type.startsWith("video/") ? "video" : "photo",
       mimeType: file.type,
       dataUrl: resized,
       timestamp: meta.timestamp.toISOString(),
@@ -1130,7 +1131,7 @@ export async function batchMatchPhotos(
     diagnostics: {
       fileTypes,
       gpsFound,
-      gpsTotal: imageFiles.length,
+      gpsTotal: mediaFiles.length,
       clientsWithCoords,
       clientsTotal: clients.length,
       matchDetails,

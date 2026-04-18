@@ -43,8 +43,8 @@ export default function ViewerPanel({
   // Attachment counts depend on mode
   const { photoCount, docCount } = useMemo(() => {
     const countFrom = (atts: Attachment[] | undefined) => {
-      const photos = atts?.filter((a) => a.mimeType.startsWith("image/")).length ?? 0;
-      const docs = atts?.filter((a) => !a.mimeType.startsWith("image/")).length ?? 0;
+      const photos = atts?.filter((a) => a.mimeType.startsWith("image/") || a.mimeType.startsWith("video/")).length ?? 0;
+      const docs = atts?.filter((a) => !a.mimeType.startsWith("image/") && !a.mimeType.startsWith("video/")).length ?? 0;
       return { photos, docs };
     };
     if (viewMode === "event" && selectedEvent) {
@@ -420,7 +420,7 @@ function EventView({
             {(event.attachments?.length ?? 0) > 0 && <span className="ml-1 text-accent">({event.attachments!.length})</span>}
           </h3>
           <div>
-            <input ref={fileInputRef} type="file" accept="image/*,.pdf,.doc,.docx" multiple className="hidden"
+            <input ref={fileInputRef} type="file" accept="image/*,video/*,.pdf,.doc,.docx" multiple className="hidden"
               onChange={(e) => { const f = e.target.files; if (f && f.length > 0) { handleFileAttach(f, event.id, onAddAttachments); e.target.value = ""; } }} />
             <button onClick={() => fileInputRef.current?.click()} className="text-[10px] px-2 py-0.5 rounded border border-accent text-accent hover:bg-accent-light active:scale-95 font-medium">+ Attach</button>
           </div>
@@ -429,7 +429,16 @@ function EventView({
           <div className="flex gap-2 overflow-x-auto pb-1">
             {event.attachments!.map((att) => (
               <div key={att.id} className="shrink-0 w-16 h-16 rounded-lg overflow-hidden border border-border relative group">
-                {att.mimeType.startsWith("image/") ? (
+                {att.mimeType.startsWith("video/") ? (
+                  <div className="w-full h-full relative">
+                    <video src={att.dataUrl} className="w-full h-full object-cover" muted preload="metadata" />
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <div className="w-5 h-5 rounded-full bg-black/60 flex items-center justify-center">
+                        <svg width="8" height="8" viewBox="0 0 24 24" fill="white"><polygon points="5,3 19,12 5,21" /></svg>
+                      </div>
+                    </div>
+                  </div>
+                ) : att.mimeType.startsWith("image/") ? (
                   <img src={att.dataUrl} alt={att.name} className="w-full h-full object-cover" />
                 ) : (
                   <div className="w-full h-full bg-gray-100 flex flex-col items-center justify-center">
@@ -653,7 +662,7 @@ function handleFileAttach(
         resolve({
           id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           name: file.name,
-          type: file.type.startsWith("image/") ? "photo" : "document",
+          type: file.type.startsWith("video/") ? "video" : file.type.startsWith("image/") ? "photo" : "document",
           mimeType: file.type,
           dataUrl: reader.result as string,
           timestamp: new Date().toISOString(),
@@ -1297,14 +1306,14 @@ function PhotoGallery({
   const photos = useMemo(() => {
     if (viewMode === "event" && event) {
       return (event.attachments || [])
-        .filter((a) => a.mimeType.startsWith("image/"))
+        .filter((a) => a.mimeType.startsWith("image/") || a.mimeType.startsWith("video/"))
         .map((a) => ({ ...a, eventLabel: event.label, eventDate: event.date }));
     }
     if (viewMode === "client-aggregate" || viewMode === "day-aggregate") {
       const result: (Attachment & { eventLabel: string; eventDate: string })[] = [];
       for (const ev of aggregateEvents) {
         for (const att of ev.attachments || []) {
-          if (att.mimeType.startsWith("image/")) {
+          if (att.mimeType.startsWith("image/") || att.mimeType.startsWith("video/")) {
             result.push({ ...att, eventLabel: ev.label, eventDate: ev.date });
           }
         }
@@ -1324,8 +1333,8 @@ function PhotoGallery({
   );
 
   const heading = viewMode === "client-aggregate" && selectedClient
-    ? `${selectedClient.name}'s Photos (${photos.length})`
-    : `${photos.length} photo${photos.length !== 1 ? "s" : ""}`;
+    ? `${selectedClient.name}'s Media (${photos.length})`
+    : `${photos.length} item${photos.length !== 1 ? "s" : ""}`;
 
   const canUpload = viewMode === "event" && event;
 
@@ -1335,9 +1344,9 @@ function PhotoGallery({
         <h3 className="text-xs font-semibold">{heading}</h3>
         {canUpload && (
           <div>
-            <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden"
+            <input ref={fileInputRef} type="file" accept="image/*,video/*" multiple className="hidden"
               onChange={(e) => { const f = e.target.files; if (f && f.length > 0) { handleFileAttach(f, event.id, onAddAttachments); e.target.value = ""; } }} />
-            <button onClick={() => fileInputRef.current?.click()} className="text-[11px] px-3 py-1 rounded-lg bg-accent text-white font-medium hover:bg-blue-600 active:scale-95">+ Add Photos</button>
+            <button onClick={() => fileInputRef.current?.click()} className="text-[11px] px-3 py-1 rounded-lg bg-accent text-white font-medium hover:bg-blue-600 active:scale-95">+ Add Media</button>
           </div>
         )}
       </div>
@@ -1346,7 +1355,18 @@ function PhotoGallery({
         <div className="grid grid-cols-3 gap-2 mb-3">
           {photos.map((img, i) => (
             <button key={img.id} onClick={() => setLightboxIndex(i)} className="aspect-square rounded-lg overflow-hidden border border-border relative group">
-              <img src={img.dataUrl} alt={img.name} className="w-full h-full object-cover" />
+              {img.mimeType.startsWith("video/") ? (
+                <>
+                  <video src={img.dataUrl} className="w-full h-full object-cover" muted preload="metadata" />
+                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                    <div className="w-7 h-7 rounded-full bg-black/60 flex items-center justify-center">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="white"><polygon points="5,3 19,12 5,21" /></svg>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <img src={img.dataUrl} alt={img.name} className="w-full h-full object-cover" />
+              )}
               {viewMode !== "event" && (
                 <div className="absolute bottom-0 left-0 right-0 bg-black/50 px-1.5 py-0.5">
                   <span className="text-[8px] text-white truncate block">{img.eventDate}</span>
@@ -1368,7 +1388,7 @@ function PhotoGallery({
           <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="mb-2">
             <rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21 15 16 10 5 21" />
           </svg>
-          <p className="text-xs">No photos</p>
+          <p className="text-xs">No photos or videos</p>
         </div>
       )}
 
@@ -1392,7 +1412,11 @@ function PhotoGallery({
               <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="9 18 15 12 9 6" /></svg>
             </button>
           )}
-          <img src={photos[lightboxIndex].dataUrl} alt={photos[lightboxIndex].name} className="max-w-[90vw] max-h-[85vh] object-contain rounded-lg" onClick={(e) => e.stopPropagation()} />
+          {photos[lightboxIndex].mimeType.startsWith("video/") ? (
+            <video src={photos[lightboxIndex].dataUrl} controls autoPlay className="max-w-[90vw] max-h-[85vh] rounded-lg" onClick={(e) => e.stopPropagation()} />
+          ) : (
+            <img src={photos[lightboxIndex].dataUrl} alt={photos[lightboxIndex].name} className="max-w-[90vw] max-h-[85vh] object-contain rounded-lg" onClick={(e) => e.stopPropagation()} />
+          )}
           <div className="absolute bottom-4 text-white/60 text-xs">
             {lightboxIndex + 1} / {photos.length} — {photos[lightboxIndex].name}
           </div>

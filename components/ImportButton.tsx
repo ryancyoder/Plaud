@@ -176,7 +176,7 @@ export default function ImportButton({
     if (!files || files.length === 0) return;
 
     const hasSrt = Array.from(files).some((f) => f.name.toLowerCase().endsWith(".srt"));
-    const hasImages = Array.from(files).some((f) => f.type.startsWith("image/"));
+    const hasImages = Array.from(files).some((f) => f.type.startsWith("image/") || f.type.startsWith("video/"));
     const hasDocs = Array.from(files).some(isDocFile);
 
     if (hasSrt) {
@@ -190,7 +190,7 @@ export default function ImportButton({
     } else if (hasDocs) {
       importDocuments(Array.from(files).filter(isDocFile));
     } else {
-      toast("Supported: .srt transcripts, images, or documents (PDF, DOC, XLS, TXT)");
+      toast("Supported: .srt transcripts, images, videos, or documents (PDF, DOC, XLS, TXT)");
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
   }
@@ -251,7 +251,7 @@ export default function ImportButton({
     const thumbs: { file: File; url: string }[] = [];
     for (let i = 0; i < pendingImageFiles.length; i++) {
       const file = pendingImageFiles[i];
-      if (file.type.startsWith("image/")) {
+      if (file.type.startsWith("image/") || file.type.startsWith("video/")) {
         const url = URL.createObjectURL(file);
         thumbs.push({ file, url });
       }
@@ -973,7 +973,16 @@ export default function ImportButton({
                             excluded ? "border-red-300 opacity-40" : "border-green-400"
                           }`}
                         >
-                          <img src={thumb.url} alt={thumb.file.name} className="w-full h-full object-cover" />
+                          {thumb.file.type.startsWith("video/") ? (
+                            <>
+                              <video src={thumb.url} className="w-full h-full object-cover" muted preload="metadata" />
+                              <div className="absolute top-1 left-1 w-5 h-5 rounded-full bg-black/60 flex items-center justify-center">
+                                <svg width="10" height="10" viewBox="0 0 24 24" fill="white"><polygon points="5,3 19,12 5,21" /></svg>
+                              </div>
+                            </>
+                          ) : (
+                            <img src={thumb.url} alt={thumb.file.name} className="w-full h-full object-cover" />
+                          )}
                           {excluded && (
                             <div className="absolute inset-0 flex items-center justify-center bg-black/30">
                               <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5">

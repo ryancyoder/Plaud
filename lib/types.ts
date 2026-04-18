@@ -3,7 +3,7 @@
 export interface Attachment {
   id: string;
   name: string;
-  type: "photo" | "document" | "note";
+  type: "photo" | "video" | "document" | "note";
   mimeType: string;
   dataUrl: string; // base64 data URL
   timestamp?: string; // ISO date-time
