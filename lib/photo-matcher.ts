@@ -1028,17 +1028,23 @@ export async function batchMatchPhotos(
   }
 
   // Step 1: Extract EXIF + resize all photos in parallel (videos stored as-is)
-  const processed = await Promise.all(
+  const processedRaw = await Promise.all(
     mediaFiles.map(async (file) => {
-      const isVideo = file.type.startsWith("video/");
-      const [meta, dataUrl] = await Promise.all([
-        isVideo ? { timestamp: new Date(file.lastModified), gps: null, dateSource: "file" as const } : getPhotoMetadata(file),
-        readFileAsDataUrl(file),
-      ]);
-      const resized = isVideo ? dataUrl : await resizeImage(dataUrl, 1200);
-      return { file, meta, resized };
+      try {
+        const isVideo = file.type.startsWith("video/");
+        const [meta, dataUrl] = await Promise.all([
+          isVideo ? { timestamp: new Date(file.lastModified), gps: null, dateSource: "file" as const } : getPhotoMetadata(file),
+          readFileAsDataUrl(file),
+        ]);
+        const resized = isVideo ? dataUrl : await resizeImage(dataUrl, 1200);
+        return { file, meta, resized };
+      } catch (err) {
+        console.warn(`Skipping file ${file.name}:`, err);
+        return null;
+      }
     }),
   );
+  const processed = processedRaw.filter((p): p is NonNullable<typeof p> => p !== null);
 
   // Step 2: Match photos to recording events by timestamp
   for (const { file, meta, resized } of processed) {
@@ -1140,9 +1146,10 @@ export async function batchMatchPhotos(
 }
 
 function readFileAsDataUrl(file: File): Promise<string> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(new Error(`Failed to read ${file.name}`));
     reader.readAsDataURL(file);
   });
 }

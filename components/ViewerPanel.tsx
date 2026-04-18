@@ -1370,19 +1370,69 @@ function MediaGallery({
 
   const canUpload = viewMode === "event" && event;
   const acceptAttr = isVideo ? "video/*" : "image/*";
+  const [importing, setImporting] = useState(false);
+
+  const handleAdd = useCallback(async (files: FileList) => {
+    if (!event) return;
+    setImporting(true);
+    try {
+      const attachments: Attachment[] = [];
+      for (const file of Array.from(files)) {
+        if (file.size > 200 * 1024 * 1024) {
+          alert(`"${file.name}" is too large (${Math.round(file.size / 1024 / 1024)}MB). Max 200MB.`);
+          continue;
+        }
+        try {
+          const dataUrl = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as string);
+            reader.onerror = () => reject(new Error("Read failed"));
+            reader.readAsDataURL(file);
+          });
+          attachments.push({
+            id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            name: file.name,
+            type: file.type.startsWith("video/") ? "video" : file.type.startsWith("image/") ? "photo" : "document",
+            mimeType: file.type,
+            dataUrl,
+            timestamp: new Date().toISOString(),
+          });
+        } catch {
+          alert(`Failed to read "${file.name}". Try a smaller file.`);
+        }
+      }
+      if (attachments.length > 0) onAddAttachments(event.id, attachments);
+    } finally {
+      setImporting(false);
+    }
+  }, [event, onAddAttachments]);
 
   return (
     <div className="p-3">
+      {canUpload && (
+        <input ref={fileInputRef} type="file" accept={acceptAttr} multiple className="hidden"
+          onChange={(e) => { const f = e.target.files; if (f && f.length > 0) { handleAdd(f); e.target.value = ""; } }} />
+      )}
+
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-xs font-semibold">{heading}</h3>
         {canUpload && (
-          <div className="flex gap-1.5">
-            <input ref={fileInputRef} type="file" accept={acceptAttr} multiple className="hidden"
-              onChange={(e) => { const f = e.target.files; if (f && f.length > 0) { handleFileAttach(f, event.id, onAddAttachments); e.target.value = ""; } }} />
-            <button onClick={() => fileInputRef.current?.click()} className="text-[11px] px-3 py-1 rounded-lg bg-accent text-white font-medium hover:bg-blue-600 active:scale-95">+ Add</button>
-          </div>
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={importing}
+            className="text-[11px] px-3 py-1.5 rounded-lg bg-accent text-white font-medium hover:bg-blue-600 active:scale-95 disabled:opacity-50"
+          >
+            {importing ? "Importing..." : `+ Add ${isVideo ? "Video" : "Photo"}`}
+          </button>
         )}
       </div>
+
+      {importing && (
+        <div className="flex items-center gap-2 mb-3 px-2 py-2 bg-blue-50 rounded-lg border border-blue-200">
+          <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+          <span className="text-[11px] text-blue-700 font-medium">Reading files...</span>
+        </div>
+      )}
 
       {items.length > 0 ? (
         <div className={`grid ${isVideo ? "grid-cols-2" : "grid-cols-3"} gap-2 mb-3`}>
@@ -1430,7 +1480,16 @@ function MediaGallery({
               <rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21 15 16 10 5 21" />
             </svg>
           )}
-          <p className="text-xs">No {label}s</p>
+          <p className="text-xs mb-3">No {label}s</p>
+          {canUpload && (
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={importing}
+              className="text-xs px-4 py-2 rounded-lg bg-accent text-white font-medium hover:bg-blue-600 active:scale-95 disabled:opacity-50"
+            >
+              {importing ? "Importing..." : `+ Add ${isVideo ? "Video" : "Photo"}`}
+            </button>
+          )}
         </div>
       )}
 
