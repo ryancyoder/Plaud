@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Client, ClientKind, ContactSubtype, CONTACT_SUBTYPES } from "@/lib/types";
+import { Client, ClientKind, ClientStatus, ContactSubtype, CONTACT_SUBTYPES, CLIENT_STATUSES } from "@/lib/types";
 import { addClient, deleteClient } from "@/lib/clients";
 import { getLastName } from "@/lib/utils";
 
@@ -27,15 +27,22 @@ export default function ClientRoster({
   const [newCompany, setNewCompany] = useState("");
   const [newSubtype, setNewSubtype] = useState<ContactSubtype>("client");
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<Set<ClientStatus>>(new Set());
+
+  const toggleStatus = (key: ClientStatus) => {
+    setStatusFilter((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  };
 
   const sorted = [...clients].sort((a, b) => getLastName(a.name).localeCompare(getLastName(b.name)));
-  const filtered = search
-    ? sorted.filter(
-        (c) =>
-          c.name.toLowerCase().includes(search.toLowerCase()) ||
-          c.company?.toLowerCase().includes(search.toLowerCase())
-      )
-    : sorted;
+  const filtered = sorted.filter((c) => {
+    if (search && !c.name.toLowerCase().includes(search.toLowerCase()) && !c.company?.toLowerCase().includes(search.toLowerCase())) return false;
+    if (statusFilter.size > 0 && !statusFilter.has(c.status || "lead")) return false;
+    return true;
+  });
 
   function handleAdd() {
     if (!newName.trim()) return;
@@ -86,6 +93,23 @@ export default function ClientRoster({
           onChange={(e) => setSearch(e.target.value)}
           className="w-full px-2.5 py-1.5 text-xs border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-accent"
         />
+        {!isProjects && (
+          <div className="flex flex-wrap gap-1 mt-1.5">
+            {CLIENT_STATUSES.map((s) => (
+              <button
+                key={s.key}
+                onClick={() => toggleStatus(s.key)}
+                className={`px-1.5 py-0.5 text-[9px] font-medium rounded border transition-colors ${
+                  statusFilter.has(s.key)
+                    ? s.color
+                    : "bg-transparent text-gray-400 border-gray-200"
+                }`}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Add form */}
