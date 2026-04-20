@@ -9,6 +9,7 @@ export const STATUS_PIN_COLORS: Record<ClientStatus, string> = {
   "project-management": "#06B6D4",
   collections: "#F97316",
   "paid-in-full": "#22C55E",
+  lost: "#EF4444",
 };
 
 // Default color for clients with no status

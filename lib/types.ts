@@ -85,7 +85,7 @@ export type Tag = "meeting" | "call" | "personal" | "medical" | "errand" | "brai
 
 // --- Client Status ---
 
-export type ClientStatus = "lead" | "propose" | "sent" | "schedule" | "project-management" | "collections" | "paid-in-full";
+export type ClientStatus = "lead" | "propose" | "sent" | "schedule" | "project-management" | "collections" | "paid-in-full" | "lost";
 
 export const CLIENT_STATUSES: { key: ClientStatus; label: string; color: string }[] = [
   { key: "lead", label: "Lead", color: "bg-gray-100 text-gray-600 border-gray-200" },
@@ -95,6 +95,7 @@ export const CLIENT_STATUSES: { key: ClientStatus; label: string; color: string 
   { key: "project-management", label: "Project Management", color: "bg-cyan-50 text-cyan-700 border-cyan-200" },
   { key: "collections", label: "Collections", color: "bg-orange-50 text-orange-700 border-orange-200" },
   { key: "paid-in-full", label: "Paid in Full", color: "bg-green-50 text-green-700 border-green-200" },
+  { key: "lost", label: "Lost", color: "bg-red-50 text-red-700 border-red-200" },
 ];
 
 // --- Project Status ---

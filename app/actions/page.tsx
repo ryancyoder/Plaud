@@ -42,6 +42,7 @@ const STATUS_BLOCK_COLORS: Record<string, string> = {
   "project-management": "#0891b2",
   collections: "#ea580c",
   "paid-in-full": "#16a34a",
+  lost: "#dc2626",
 };
 
 type ForecastBlock = {
